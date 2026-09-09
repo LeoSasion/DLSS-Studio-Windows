@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>DLSS Studio · 影像增强</title><link rel="icon" href="/assets/icons/star-four.svg"><link rel="stylesheet" href="/studio.css"><script>try{document.documentElement.dataset.theme=localStorage.getItem('dlss-theme')||'dark'}catch{}</script><link rel="stylesheet" href="/dark-polish.css"></head>
+<body>
+<div class="studio">
+ <header class="topbar glass">
+  <a href="/" class="brand" aria-label="DLSS Studio 首页"><img class="icon brand-icon" src="/assets/icons/star-four.svg" alt=""><span>DLSS Studio</span></a>
+  <nav class="mode-tabs" aria-label="处理类型"><button type="button" class="active" data-mode="image" aria-pressed="true">图片增强</button><button type="button" data-mode="video" aria-pressed="false">视频增强</button></nav>
+  <div class="theme-switch segmented" aria-label="外观主题"><button type="button" data-theme="light" aria-label="浅色主题" title="浅色主题"><img class="icon" src="/assets/icons/sun.svg" alt=""></button><button type="button" data-theme="dark" aria-label="深色主题" title="深色主题"><img class="icon" src="/assets/icons/moon.svg" alt=""></button></div>
+ </header>
+ <main class="workspace">
+  <section class="canvas-panel glass" aria-label="素材与结果预览">
+   <div class="canvas-toolbar">
+    <div class="file-info"><img class="icon" src="/assets/icons/image.svg" alt=""><div><strong id="file-name">山湖 · 示例素材</strong><span id="file-meta">1440 × 1080</span></div></div>
+    <button type="button" class="glass-button replace" id="upload-button"><img class="icon" src="/assets/icons/folder.svg" alt=""><span>更换素材</span></button>
+    <div class="view-switch segmented" aria-label="预览模式"><button type="button" data-view="original" class="active" aria-pressed="true">原图</button><button type="button" data-view="result" disabled aria-pressed="false">增强后</button><button type="button" data-view="compare" disabled aria-pressed="false">对比</button></div>
+   </div>
+   <div class="canvas" id="canvas">
+    <div class="image-stage" id="image-stage"><img id="source-image" src="/assets/sample-lake.png" alt="示例素材：高山与湖泊"><img id="result-image" alt="增强结果" hidden><div id="compare-line" hidden><span><img class="icon" src="/assets/icons/arrows-horizontal.svg" alt=""></span></div><input id="compare-slider" type="range" min="0" max="100" value="50" aria-label="拖动比较原图与结果" hidden><span class="image-label" id="source-label">示例素材</span><span class="image-label right" id="result-label" hidden>增强后</span></div>
+    <video id="video-preview" controls playsinline preload="metadata" hidden></video>
+    <div class="empty-state" id="empty-state" hidden><img class="icon" src="/assets/icons/upload-simple.svg" alt=""><h2>把视频拖到这里</h2><p>支持 MP4、MOV、MKV 等常见格式</p><button type="button" class="glass-button" id="empty-upload">选择视频</button></div>
+    <div class="drop-overlay" id="drop-overlay" hidden><img class="icon" src="/assets/icons/upload-simple.svg" alt=""><span>松开以上传素材</span></div>
+   </div>
+   <div id="notice" class="notice" role="status" hidden><img class="icon" src="/assets/icons/info.svg" alt=""><span id="notice-text"></span><button id="close-notice" type="button" aria-label="关闭提示"><img class="icon" src="/assets/icons/x.svg" alt=""></button></div>
+  </section>
+  <aside class="inspector glass" aria-label="增强设置"><div class="inspector-title"><h1>增强设置</h1><button type="button" class="icon-button" id="reset-settings" title="恢复默认设置" aria-label="恢复默认设置"><img class="icon" src="/assets/icons/arrow-clockwise.svg" alt=""></button></div>
+   <form id="settings-form">
+    <section class="setting-section"><label>输出尺寸</label><div class="segmented size-switch"><button type="button" data-scale="1">原始</button><button type="button" data-scale="1.5">×1.5</button><button type="button" data-scale="2" class="active">×2</button><button type="button" data-scale="3">×3</button></div>
+     <label for="size-preset">分辨率预设</label><select id="size-preset" name="size"><option value="scale">按倍数</option><option>720p (1280×720)</option><option>1080p (1920×1080)</option><option>1440p (2560×1440)</option><option>4K (3840×2160)</option><option>5K (5120×2880)</option><option>8K (7680×4320)</option><option value="自定义">自定义</option></select>
+     <details id="custom-details"><summary>自定义尺寸<img class="icon" src="/assets/icons/caret-right.svg" alt=""></summary><div class="detail-content"><div class="two-fields"><label>宽度 / 像素<input name="width" type="number" min="0" max="16384" step="1" value="0"></label><label>高度 / 像素<input name="height" type="number" min="0" max="16384" step="1" value="0"></label></div><label>放大倍数<input name="scale" type="number" min="1" max="4" step="0.05" value="2"></label><p class="helper">单边为 0 时保持比例；宽高都为 0 时使用倍数。</p></div></details>
+    </section>
+    <section class="setting-section"><label>画面风格</label><div class="segmented style-switch"><button type="button" data-style="默认" class="active">默认</button><button type="button" data-style="自然">自然</button><button type="button" data-style="电影">电影</button></div>
+     <div class="range-heading"><label for="intensity">增强强度</label><input id="intensity-number" type="number" min="0" max="2" step="0.05" value="1" aria-label="增强强度数值"></div><input id="intensity" name="intensity" type="range" min="0" max="2" step="0.05" value="1"><div class="range-bounds"><span>0</span><span>2</span></div>
+     <label for="sr-preset">超分辨率模型</label><select id="sr-preset" name="sr_preset"><option>自动选择（推荐）</option></select>
+    </section>
+    <details class="advanced"><summary>高级设置<img class="icon" src="/assets/icons/caret-right.svg" alt=""></summary><div class="detail-content"><label>渲染预设<select name="preset"><option>默认</option><option>预设 1</option><option>预设 2</option><option>预设 3</option></select></label><div id="advanced-sliders"></div><label class="check-row"><input type="checkbox" name="ui_correction">界面元素修正</label><label class="check-row"><input type="checkbox" name="auto_mask">自动遮罩</label><label class="check-row"><input type="checkbox" name="hdr">HDR 线性色彩</label></div></details>
+    <div id="video-settings" hidden>
+     <details><summary>运动与时序<img class="icon" src="/assets/icons/caret-right.svg" alt=""></summary><div class="detail-content"><label>运动估计引擎<select name="motion_engine"><option value="auto">自动选择（推荐）</option><option value="nvof">NVIDIA 光流</option><option value="lk">LK 光流</option></select></label><label class="check-row"><input type="checkbox" name="motion" checked>启用运动补偿</label><label class="check-row"><input type="checkbox" name="motion_vis">显示光流（调试）</label></div></details>
+     <details open><summary>视频导出<img class="icon" src="/assets/icons/caret-right.svg" alt=""></summary><div class="detail-content"><label>视频编码<select name="codec" id="codec"></select></label><div class="two-fields"><label>文件格式<select name="container" id="container"></select></label><label>位深<select name="bit_depth"><option value="10">10 bit</option><option value="8">8 bit</option></select></label></div><label>输出画质<select id="quality"><option value="15">极高画质（CQ 15）</option><option value="19" selected>高画质（CQ 19）</option><option value="23">均衡（CQ 23）</option><option value="28">节省空间（CQ 28）</option><option value="custom">自定义</option></select></label><div id="custom-quality" class="two-fields" hidden><label>CQ<input type="number" name="cq" value="19" min="0" max="51"></label><label>码率 / kbit/s<input type="number" name="bitrate" value="0" min="0" max="1000000"></label></div><label>音频处理<select name="audio"><option value="auto">自动选择</option><option value="copy">保留原音轨</option><option value="aac">AAC</option><option value="opus">Opus</option><option value="flac">FLAC 无损</option><option value="none">移除音频</option></select></label><label>编码预设<select name="enc_preset"><option>p1</option><option>p2</option><option>p3</option><option>p4</option><option selected>p5</option><option>p6</option><option>p7</option></select></label><label id="prores-field" hidden>ProRes 规格<select name="prores_profile"><option>proxy</option><option>lt</option><option>standard</option><option selected>hq</option><option>4444</option><option>4444xq</option></select></label><label>处理帧数（0 为全部）<input name="frames" type="number" min="0" step="1" value="0"></label></div></details>
+    </div>
+   </form>
+  </aside>
+  <div class="output-bar glass"><div class="output-info"><img class="icon" src="/assets/icons/download-simple.svg" alt=""><span>输出</span><strong id="output-size">—</strong><button type="button" id="status-button" title="查看处理日志"><span class="status-dot"></span><span id="status-text">等待素材</span></button></div><a class="glass-button download disabled" id="download" aria-disabled="true" tabindex="-1"><img class="icon" src="/assets/icons/download-simple.svg" alt="">下载结果</a></div>
+  <button type="button" id="start-button" class="start-button glass" disabled><img class="icon" src="/assets/icons/play.svg" alt=""><span>开始处理</span></button>
+ </main>
+</div>
+<input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" hidden>
+<dialog id="log-dialog"><div class="dialog-heading"><h2>处理日志</h2><button type="button" id="close-log" class="icon-button" aria-label="关闭日志"><img class="icon" src="/assets/icons/x.svg" alt=""></button></div><pre id="job-log">尚未开始处理。</pre></dialog>
+<script src="/studio.js" defer></script>
+</body></html>

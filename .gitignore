@@ -1,0 +1,27 @@
+# Local environments and engine binaries belong outside the Git history.
+.venv/
+runtime/
+__pycache__/
+*.py[cod]
+app/out/
+app/uploads/
+app/ui_out/
+logs/
+*.log
+*.pid
+packaging/build/
+packaging/cache/
+packaging/validation/
+outputs/
+*.zip
+*.7z
+*.dll
+*.exe
+.env
+.env.*
+!.env.example
+publication/
+
+# Local publication planning, not project source.
+PUBLISHING.md
+RELEASE-NOTES.md
