@@ -40,7 +40,7 @@ try:
 except OSError:
     reservation.close()
     reservation=None
-exe = subprocess.Popen([str(package / "WebUI启动器.exe"), "--smoke-test", "--hold"],
+exe = subprocess.Popen([str(package / "DLSS Studio.exe"), "--smoke-test", "--hold"],
     cwd=validation, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
 report = {"runtime": runtime, "payload_files":len(manifest)}
 try:
@@ -99,7 +99,7 @@ finally:
     if exe.returncode != 0:
         raise RuntimeError((package / "smoke-result.txt").read_text(encoding="utf-8"))
 report["launcher"]=(package / "smoke-result.txt").read_text(encoding="utf-8-sig")
-report["preview"]=str(package / "launcher-preview.png")
+assert not (package / "WebUI启动器.exe").exists()
 desktop = subprocess.Popen([str(package / "DLSS Studio.exe"), "--desktop-smoke-test"],
     cwd=validation, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
 desktop.wait(timeout=180)

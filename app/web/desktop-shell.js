@@ -7,6 +7,14 @@
   const actions = document.createElement('div');
   actions.className = 'desktop-actions';
   actions.append(document.querySelector('.theme-switch'));
+  const browser = document.createElement('button');
+  browser.type = 'button';
+  browser.className = 'open-browser';
+  browser.textContent = '浏览器';
+  browser.title = '在浏览器中打开';
+  browser.setAttribute('aria-label', browser.title);
+  browser.addEventListener('click', () => send('open-browser'));
+  actions.append(browser);
   const controls = document.createElement('div');
   controls.className = 'desktop-window-controls';
   for (const [action, label, icon] of [['minimize', '最小化窗口', 'minus'], ['close', '关闭窗口', 'x']]) {

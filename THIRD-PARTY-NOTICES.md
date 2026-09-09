@@ -7,7 +7,7 @@
 - `app/web/index.html`、`app/web/studio.css`、`app/web/dark-polish.css`、`app/web/studio.js`、`app/web/desktop-shell.js`、`app/web/desktop-shell.css`。
 - `app/studio_server.py`、`app/serve_local.py`、`app/ui_style.py`、`app/test_studio_server.py`。
 - `start_studio.py`、`start-web.bat`。
-- `packaging/Launcher.cs`、`packaging/DesktopShell.cs`、本项目原创的打包与验证脚本。
+- `packaging/StudioService.cs`、`packaging/DesktopShell.cs`、本项目原创的打包与验证脚本。
 - 本项目原创文档；不包括其中引用的第三方文本。
 
 上述 MIT 许可仅授予本项目贡献者有权授予的权利，不改变以下第三方内容的许可，也不为包含它们的整个发行包授予统一的 MIT 许可。

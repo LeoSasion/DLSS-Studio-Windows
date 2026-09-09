@@ -1,4 +1,4 @@
-"""Build the two Windows entry points and vendor Microsoft's WebView2 SDK."""
+"""Build the Windows desktop entry point and vendor Microsoft's WebView2 SDK."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -38,17 +38,20 @@ def build_launchers(package, root):
     shutil.copy2(sdk / "NOTICE.txt", package / "licenses/WebView2-NOTICE.txt")
     source = package / "launcher-source"
     source.mkdir(exist_ok=True)
-    for name in ("Launcher.cs", "DesktopShell.cs"):
+    # Retire only known legacy files inside this explicitly selected package.
+    for legacy in (package / "WebUI启动器.exe", source / "Launcher.cs"):
+        assert legacy.resolve().is_relative_to(package.resolve())
+        legacy.unlink(missing_ok=True)
+    for name in ("StudioService.cs", "DesktopShell.cs"):
         shutil.copy2(root / "packaging" / name, source / name)
     compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     common = [str(compiler), "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/codepage:65001",
         "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll"]
-    subprocess.run(common + ["/main:Program", "/out:" + str(package / "WebUI启动器.exe"), str(source / "Launcher.cs")], check=True)
     subprocess.run(common + ["/main:DesktopProgram", "/out:" + str(package / "DLSS Studio.exe"),
         "/reference:" + str(package / "Microsoft.Web.WebView2.Core.dll"),
         "/reference:" + str(package / "Microsoft.Web.WebView2.WinForms.dll"),
-        str(source / "Launcher.cs"), str(source / "DesktopShell.cs")], check=True)
-    print("Built DLSS Studio.exe (embedded desktop) and WebUI启动器.exe (external browser).", flush=True)
+        str(source / "StudioService.cs"), str(source / "DesktopShell.cs")], check=True)
+    print("Built DLSS Studio.exe (desktop and browser access).", flush=True)
 
 if __name__ == "__main__":
     import sys

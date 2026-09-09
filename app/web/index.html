@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="dark">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>DLSS Studio · 影像增强</title><link rel="icon" href="/assets/icons/star-four.svg"><link rel="stylesheet" href="/studio.css"><script>try{document.documentElement.dataset.theme=localStorage.getItem('dlss-theme')||'dark'}catch{}</script><link rel="stylesheet" href="/dark-polish.css"><link rel="stylesheet" href="/desktop-shell.css"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>DLSS Studio · 影像增强</title><link rel="icon" href="/assets/icons/star-four.svg"><link rel="stylesheet" href="/studio.css"><script>try{document.documentElement.dataset.theme=localStorage.getItem('dlss-theme')||'dark'}catch{}</script><link rel="stylesheet" href="/dark-polish.css"><link rel="stylesheet" href="/desktop-shell.css"><link rel="stylesheet" href="/workspace.css"></head>
 <body>
 <div class="studio">
  <header class="topbar glass">
@@ -46,5 +46,5 @@
 </div>
 <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" hidden>
 <dialog id="log-dialog"><div class="dialog-heading"><h2>处理日志</h2><button type="button" id="close-log" class="icon-button" aria-label="关闭日志"><img class="icon" src="/assets/icons/x.svg" alt=""></button></div><pre id="job-log">尚未开始处理。</pre></dialog>
-<script src="/studio.js" defer></script>
+<script src="/studio.js" defer></script><script src="/workspace.js" defer></script>
 <script src="/desktop-shell.js"></script></body></html>

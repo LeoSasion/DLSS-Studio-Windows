@@ -107,59 +107,12 @@ internal sealed class StudioService : IDisposable {
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
 }
 
-internal sealed class Launcher : Form {
-    readonly StudioService service=new StudioService();
-    Label status,address; Button start,stop,open; bool starting;
-    public Launcher() {
-        Text="WebUI启动器 · DLSS Studio"; ClientSize=new Size(620,432);
-        FormBorderStyle=FormBorderStyle.FixedSingle; MaximizeBox=false; StartPosition=FormStartPosition.CenterScreen;
-        AutoScaleMode=AutoScaleMode.Dpi; Font=new Font("Microsoft YaHei UI",10);
-        BackColor=Color.FromArgb(239,241,244); ForeColor=Color.FromArgb(32,44,59);
-        Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        var title=new Label{Text="DLSS Studio",Font=new Font(Font.FontFamily,25,FontStyle.Bold),Location=new Point(30,25),Size=new Size(480,50)};
-        Controls.Add(title);
-        Controls.Add(new Label{Text="WebUI启动器   /   在浏览器中打开工作台",Location=new Point(33,80),Size=new Size(500,26),ForeColor=Color.FromArgb(104,114,128)});
-        var card=new Panel{Location=new Point(30,128),Size=new Size(560,96),BackColor=Color.White};
-        card.Paint+=(s,e)=>{using(var pen=new Pen(Color.FromArgb(220,225,231))) e.Graphics.DrawRectangle(pen,0,0,card.Width-1,card.Height-1);};
-        status=new Label{Text="准备就绪",Font=new Font(Font.FontFamily,14,FontStyle.Bold),Location=new Point(20,17),Size=new Size(520,30)};
-        address=new Label{Text="点击下方按钮，启动后自动打开浏览器",Location=new Point(20,54),Size=new Size(520,26),ForeColor=Color.FromArgb(106,116,131)};
-        card.Controls.Add(status);card.Controls.Add(address);Controls.Add(card);
-        start=MakeButton("启动并打开",30,244,270,54,true); stop=MakeButton("停止服务",316,244,274,54,false); stop.Enabled=false;
-        open=MakeButton("打开网页",30,316,174,42,false);open.Enabled=false;
-        var output=MakeButton("输出文件夹",222,316,176,42,false);
-        var logs=MakeButton("查看日志",416,316,174,42,false);
-        Controls.Add(new Label{Text="运行环境已内置 · 保持此窗口开启即可持续使用",Location=new Point(30,383),Size=new Size(560,24),ForeColor=Color.FromArgb(113,121,135),Font=new Font(Font.FontFamily,9)});
-        start.Click+=async(s,e)=>await StartService();
-        stop.Click+=(s,e)=>{if(service.Busy() && MessageBox.Show(this,"正在处理素材，停止服务会中断当前任务。确定停止？","停止服务",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;service.Stop();SetStopped("服务已停止");};
-        open.Click+=(s,e)=>Open(service.Url);
-        output.Click+=(s,e)=>{var path=Path.Combine(service.AppDir,"ui_out");Directory.CreateDirectory(path);Open(path);};
-        logs.Click+=(s,e)=>{Directory.CreateDirectory(service.LogDir);Open(service.LogDir);};
-        FormClosing+=(s,e)=>{if(starting){e.Cancel=true;return;} if(service.Running && MessageBox.Show(this,"关闭启动窗口将停止服务"+(service.Busy()?"并中断当前处理任务":"")+"。确定关闭？","关闭 DLSS Studio",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes){e.Cancel=true;return;} service.Dispose();};
-        var timer=new System.Windows.Forms.Timer{Interval=2000};
-        timer.Tick+=(s,e)=>{if(!starting && stop.Enabled && !service.Running)SetStopped("服务已退出，请查看日志");}; timer.Start();
-    }
-    Button MakeButton(string text,int x,int y,int w,int h,bool primary){
-        var b=new Button{Text=text,Location=new Point(x,y),Size=new Size(w,h),FlatStyle=FlatStyle.Flat,BackColor=primary?Color.FromArgb(30,117,103):Color.White,ForeColor=primary?Color.White:ForeColor,Cursor=Cursors.Hand};
-        b.FlatAppearance.BorderColor=primary?Color.FromArgb(30,117,103):Color.FromArgb(210,216,224); b.FlatAppearance.BorderSize=1; Controls.Add(b);return b;
-    }
-    async Task StartService(){
-        starting=true;start.Enabled=false;status.Text="正在启动…";address.Text="首次启动可能需要几十秒，请稍候";
-        try{await service.Start();status.Text="服务运行中";address.Text=service.Url;stop.Enabled=true;open.Enabled=true;Open(service.Url);}
-        catch(Exception ex){SetStopped("启动失败");MessageBox.Show(this,ex.Message,"DLSS Studio",MessageBoxButtons.OK,MessageBoxIcon.Error);}
-        finally{starting=false;start.Enabled=!service.Running;}
-    }
-    void SetStopped(string text){status.Text=text;address.Text="点击启动即可重新打开工作台";start.Enabled=true;stop.Enabled=false;open.Enabled=false;}
-    static void Open(string target){try{Process.Start(new ProcessStartInfo(target){UseShellExecute=true});}catch(Exception ex){MessageBox.Show(ex.Message,"无法打开");}}
-    public void CapturePreview(string path){Opacity=0;ShowInTaskbar=false;Show();Application.DoEvents();using(var image=new Bitmap(Width,Height)){DrawToBitmap(image,new Rectangle(Point.Empty,Size));image.Save(path);}Hide();}
-}
-
-internal static class Program {
-    [STAThread] static int Main(string[] args){
+internal static class ServiceDiagnostics {
+    public static int Run(string[] args){
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
         if(args.Length>0 && args[0]=="--smoke-test"){
             var service=new StudioService();
             try{
-                using(var form=new Launcher()) form.CapturePreview(Path.Combine(service.Root,"launcher-preview.png"));
                 Task.Run(()=>service.Start()).GetAwaiter().GetResult();
                 var port=service.Port;
                 File.WriteAllText(Path.Combine(service.Root,"smoke-ready.txt"),service.Url);
@@ -169,19 +122,10 @@ internal static class Program {
                 }
                 service.Stop();Thread.Sleep(1000);
                 if(service.Health(port)!=null)throw new Exception("服务停止后端口仍在响应");
-                File.WriteAllText(Path.Combine(service.Root,"smoke-result.txt"),"PASS: launcher rendered; portable service ready; service stopped. Port="+port);
+                File.WriteAllText(Path.Combine(service.Root,"smoke-result.txt"),"PASS: portable service ready; service stopped. Port="+port);
                 return 0;
             }catch(Exception ex){File.WriteAllText(Path.Combine(service.Root,"smoke-result.txt"),ex.ToString());return 1;}
             finally{service.Dispose();}
-        }
-        using(var service=new StudioService()){
-            bool created;using(var mutex=new Mutex(true,"Local\\DLSSStudio_"+service.Identity,out created)){
-                if(!created){
-                    try{var state=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(service.LogDir,"instance.json")));service.Port=Convert.ToInt32(state["port"]);if(service.Ready()){Process.Start(service.Url);return 0;}}catch{}
-                    MessageBox.Show("此部署包的启动窗口已打开，请从任务栏切换到 DLSS Studio。","DLSS Studio");return 0;
-                }
-                try{Application.Run(new Launcher());}finally{mutex.ReleaseMutex();}
-            }
         }
         return 0;
     }

@@ -8,25 +8,21 @@
 
 - 图片与视频增强，支持输出尺寸、画面风格及高级参数设置。
 - 图片原图、结果与拖动对比；视频预览与文件下载。
-- 深色光泽折射边缘；浅色统一中性微渐变和卡片阴影。
+- 深浅主题、透明预览背景和扁平控件；主界面适配窗口，高级参数使用独立面板，小窗口自动分页。
 - `DLSS Studio.exe`：内嵌 WebView2，直接显示完整工作台，无系统边框；支持拖动、调整大小、右上角最小化和关闭。
-- `WebUI启动器.exe`：保留原启动中心，可启动、停止、在外部浏览器打开网页、查看日志和输出文件。
+- 独立窗口右上角“浏览器”可打开同一 Web 服务，无需第二个启动器。关闭独立窗口会停止服务；外部浏览器与独立窗口的当前素材和预览独立保存。
 - 默认端口被占用时自动选择可用端口，仅监听 `127.0.0.1`。
 - 检查显卡编码可用性，不可用时默认采用 ProRes CPU 编码。
 
 ![独立桌面窗口](docs/desktop.png)
 
-<details><summary>WebUI启动器</summary>
 
-![WebUI启动器](docs/launcher.png)
-
-</details>
 
 ## 下载与使用
 
 发行包使用 [GitHub Releases](https://github.com/LeoSasion/DLSS-Studio-Windows/releases) 分发。当前提交为源码版，首个发行版尚未公开发布；Gitee 镜像尚未配置。
 
-获取发行包后，完整解压 ZIP，双击 `DLSS Studio.exe` 直接进入独立窗口。需要外部浏览器时，打开 `WebUI启动器.exe` 并点击“启动并打开”。Python 运行环境随发行包提供。独立窗口还使用 Microsoft WebView2；缺少时可选择通过包内微软引导程序联网安装。
+获取发行包后，完整解压 ZIP，双击 `DLSS Studio.exe` 直接进入独立窗口。需要外部浏览器时，点击窗口右上角“浏览器”，并保持独立窗口开启或最小化。Python 运行环境随发行包提供。独立窗口还使用 Microsoft WebView2；缺少时可选择通过包内微软引导程序联网安装。
 
 Windows x64；DLSS 神经渲染需要兼容的 NVIDIA 显卡与驱动。CPU 编码仅负责视频编码，不能替代神经渲染所需的显卡。
 
@@ -47,7 +43,7 @@ Windows x64；DLSS 神经渲染需要兼容的 NVIDIA 显卡与驱动。CPU 编�
 | `app/studio_server.py` | 上传、任务队列、处理引擎桥接与下载服务 |
 | `app/app.py`、`app/nr_video.py` | 上游代码及本地适配，许可待确认 |
 | `packaging/DesktopShell.cs` | 无边框 WebView2 桌面窗口 |
-| `packaging/Launcher.cs` | WebUI启动器及服务进程管理 |
+| `packaging/StudioService.cs` | 服务进程管理 |
 | `packaging/` | 便携包构建脚本与使用说明 |
 
 上传素材保存在 `app/uploads/`，结果保存在 `app/ui_out/`。以上目录、Python 运行环境和发行 ZIP 均排除在源码仓库之外。
@@ -68,4 +64,4 @@ Windows 工作站已验证独立解压、包内 Python 依赖加载、EXE 服务
 
 准备好依赖环境与 `app/out/` 后，执行 `app\.venv\Scripts\python.exe packaging/build_package.py`，再执行 `app\.venv\Scripts\python.exe packaging/archive_package.py`。构建会从微软 NuGet 获取固定版本的 WebView2 SDK，并验证微软引导安装器签名。
 
-`packaging/verify_package.py` 会独立解压发行包，验证所有校验值，并测试 WebUI 服务和无边框桌面窗口，包括真实图片处理、下载、最小化与关闭。该验证需要兼容显卡。
+`packaging/verify_package.py` 会独立解压发行包，验证所有校验值，并测试唯一 EXE 的服务管理及无边框桌面窗口，包括真实图片处理、下载、最小化与关闭。该验证需要兼容显卡。

@@ -50,7 +50,7 @@ internal sealed class DesktopShell : Form {
             catch(WebView2RuntimeNotFoundException) { missingRuntime=true; }
             if(missingRuntime) {
                 if(smoke)throw new InvalidOperationException("WebView2 Runtime not installed");
-                var choice=MessageBox.Show(this,"独立窗口需要 Microsoft WebView2。现在安装此组件？首次安装需要联网；也可关闭后使用 WebUI启动器。","安装浏览器组件",MessageBoxButtons.YesNo,MessageBoxIcon.Information);
+                var choice=MessageBox.Show(this,"独立窗口需要 Microsoft WebView2。现在安装此组件？首次安装需要联网。","安装浏览器组件",MessageBoxButtons.YesNo,MessageBoxIcon.Information);
                 if(choice!=DialogResult.Yes){allowClose=true;Close();return;}
                 message.Text="正在安装 WebView2…\n请保持网络连接";
                 var installer=Path.Combine(service.Root,"components","MicrosoftEdgeWebview2Setup.exe");
@@ -86,6 +86,10 @@ internal sealed class DesktopShell : Form {
                 if(!OwnOrigin(e.Source))return;
                 string action;try{action=e.TryGetWebMessageAsString();}catch{return;}
                 if(action=="minimize")WindowState=FormWindowState.Minimized;
+                else if(action=="open-browser") {
+                    try { Process.Start(new ProcessStartInfo(service.Url){UseShellExecute=true}); }
+                    catch(Exception ex){MessageBox.Show(this,ex.Message,"无法打开浏览器");}
+                }
                 else if(action=="close")Close();
                 else if(action=="drag")DragWindow();
                 else if(action=="maximize")ToggleMaximize();
@@ -136,7 +140,16 @@ internal sealed class DesktopShell : Form {
             var core=web.CoreWebView2;
             if(!await Check("document.querySelector('.desktop-window-controls') && document.querySelector('#source-image').naturalWidth>0",20))throw new Exception("Native controls or image missing");
             var normalSize=Size;Size=MinimumSize;await Task.Delay(250);
-            if(!await Check("document.documentElement.scrollWidth<=innerWidth && document.querySelector('.window-close').getBoundingClientRect().right<=innerWidth",3))throw new Exception("Compact window overflow");
+            if(!await Check("document.documentElement.scrollWidth<=innerWidth && document.documentElement.scrollHeight<=innerHeight && document.querySelector('.window-close').getBoundingClientRect().right<=innerWidth && document.querySelector('.inspector').scrollHeight<=document.querySelector('.inspector').clientHeight && document.querySelector('.open-browser')",3))throw new Exception("Compact window overflow");
+            await core.ExecuteScriptAsync("document.querySelector('[data-mode=video]').click();document.querySelector('#video-settings details:last-child summary').click()");
+            if(!await Check("document.querySelector('#settings-dialog').open && document.querySelector('#settings-dialog').scrollHeight<=document.querySelector('#settings-dialog').clientHeight && document.querySelector('#settings-form').elements.codec",3))throw new Exception("Video settings dialog overflow or form association lost");
+            await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click()");
+            await Task.Delay(100);
+            if(!await Check("document.querySelector('.inspector').scrollHeight<=document.querySelector('.inspector').clientHeight",3))throw new Exception("Video inspector overflow");
+            await core.ExecuteScriptAsync("document.querySelector('[data-mode=image]').click();document.querySelector('#custom-details summary').click()");
+            if(!await Check("document.querySelector('#settings-dialog').open && document.querySelector('#settings-form').elements.width",3))throw new Exception("Custom settings dialog failed");
+            await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click()");
+            await Task.Delay(100);
             Size=normalSize;await Task.Delay(250);
             await core.ExecuteScriptAsync("document.querySelector('[data-theme=light][type=button]').click()");
             if(!await Check("document.documentElement.dataset.theme==='light'",5))throw new Exception("Light theme failed");
@@ -161,7 +174,7 @@ internal sealed class DesktopShell : Form {
             if(WindowState!=FormWindowState.Minimized)throw new Exception("Minimize command failed");
             WindowState=FormWindowState.Normal;
             if(OwnOrigin("https://example.com/")||OwnOrigin("file:///C:/"))throw new Exception("Origin validation failed");
-            File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),"PASS: borderless WebView2; dark/light themes; real upload and render; compare; download; minimize; close requested; service_port="+service.Port);
+            File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),"PASS: borderless WebView2; compact image/video layout without overflow; settings dialogs and form fields; dark/light themes; real upload and render; compare; download; minimize; close requested; service_port="+service.Port);
             TestResult=0;
             await core.ExecuteScriptAsync("setTimeout(()=>document.querySelector('.window-close').click(),100)");
         } catch(Exception ex){File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),ex.ToString());allowClose=true;Close();}
@@ -177,6 +190,7 @@ internal static class DesktopProgram {
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
     [STAThread] static int Main(string[] args){
         SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+        if(args.Length>0&&args[0]=="--smoke-test")return ServiceDiagnostics.Run(args);
         bool test=args.Length>0&&args[0]=="--desktop-smoke-test";
         using(var service=new StudioService()){
             string identity=service.Identity;uint activate=RegisterWindowMessage("DLSSStudioDesktop_"+identity);
