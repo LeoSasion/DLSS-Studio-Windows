@@ -22,9 +22,18 @@
 
 ## 下载与使用
 
-发行包使用 [GitHub Releases](https://github.com/LeoSasion/DLSS-Studio-Windows/releases) 分发。当前提交为源码版，首个发行版尚未公开发布；Gitee 镜像尚未配置。
+发行包使用 [GitHub Releases](https://github.com/LeoSasion/DLSS-Studio-Windows/releases) 分发。请下载 Release 附件中的 `DLSS-Studio-Windows-x64.zip`，而不是 GitHub 自动生成的 Source code 压缩包。Gitee 镜像尚未配置。
 
 获取发行包后，完整解压 ZIP，双击 `DLSS Studio.exe` 直接进入独立窗口。需要外部浏览器时，点击窗口右上角“浏览器”，并保持独立窗口开启或最小化。Python 运行环境随发行包提供。独立窗口还使用 Microsoft WebView2；缺少时可选择通过包内微软引导程序联网安装。
+
+### 浏览器访问地址与端口
+
+启动 `DLSS Studio.exe` 后，默认浏览器地址为 **http://127.0.0.1:7860/**。
+
+- 若 7860 已被占用，启动器会在 **7860–7959** 内自动寻找空闲端口，例如 7861、7862。
+- 点击独立窗口右上角的 **“浏览器”**，会打开当前实例的实际地址；不要固定使用旧标签页的端口。
+- 服务仅监听本机 `127.0.0.1`，不对局域网开放。使用浏览器时需保持 EXE 开启或最小化，关闭 EXE 会停止它启动的服务。
+- 手动运行 `start-web.bat` 默认使用 7860；自动避让端口是 EXE 启动器提供的功能。
 
 Windows x64；DLSS 神经渲染需要兼容的 NVIDIA 显卡与驱动。CPU 编码仅负责视频编码，不能替代神经渲染所需的显卡。
 
