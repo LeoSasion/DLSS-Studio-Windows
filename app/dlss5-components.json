@@ -1,0 +1,31 @@
+{
+  "source": "https://github.com/purkatyy/DLSS5-/releases/tag/dlss",
+  "tag": "dlss",
+  "profiles": {
+    "rtx30": {
+      "path": "out/dlss5/rtx30/nvngx_dlssnr.dll",
+      "sha256": "f8c6ca1d27faaa82bbb6fdc26889622aa42098ec551346b7c99dade2ff93902d",
+      "bytes": 165840496,
+      "asset": "RTX30xx.rar",
+      "asset_sha256": "62427325f40aef0fc703904f53055883740ff8d2721203cfe376f33892b304b1",
+      "url": "https://github.com/purkatyy/DLSS5-/releases/download/dlss/RTX30xx.rar"
+    },
+    "rtx40": {
+      "path": "out/dlss5/rtx40/nvngx_dlssnr.dll",
+      "sha256": "ceb6432f6fbdf44d886014bcd47241932bf8b67439feef9bbdd0961436662650",
+      "bytes": 165840496,
+      "asset": "DLSS5Tool.zip",
+      "asset_sha256": "733c334f3b30d10d7fbd4d75f7242ff01b6e08380ac3396b39920e47eb6f65d0",
+      "url": "https://github.com/purkatyy/DLSS5-/releases/download/dlss/DLSS5Tool.zip"
+    },
+    "rtx50": {
+      "path": "out/dlss5/rtx50/nvngx_dlssnr.dll",
+      "sha256": "e16bcf15e16e13f527491cdf7845b2fe6521a738d8f7c9c721866a8496e1fc8e",
+      "bytes": 165840496,
+      "asset": "RTX50xx.rar",
+      "asset_sha256": "97d5d4292937d5f7839c2a0755c63961dc5db8b755fd994e37607496e14e31dd",
+      "url": "https://github.com/purkatyy/DLSS5-/releases/download/dlss/RTX50xx.rar"
+    }
+  },
+  "note": "Publisher marks RTX 30/50 variants as untested. Matching is not proof of compatibility."
+}

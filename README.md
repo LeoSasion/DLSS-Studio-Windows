@@ -6,7 +6,7 @@
 
 ## 功能
 
-- 图片与视频增强，支持输出尺寸、画面风格及高级参数设置。
+- DLSS 5 图片与视频增强，自动识别显卡并加载适配组件，无需手动选择模型。
 - 图片原图、结果与拖动对比；视频预览与文件下载。
 - 深色光泽折射边缘、浅色中性微渐变与阴影、透明预览背景；主界面适配窗口，高级参数使用独立面板，小窗口自动分页。
 - `DLSS Studio.exe`：内嵌 WebView2，直接显示完整工作台，无系统边框；支持拖动、调整大小、右上角最小化和关闭。
@@ -31,7 +31,8 @@ Windows x64；DLSS 神经渲染需要兼容的 NVIDIA 显卡与驱动。CPU 编�
 1. 安装 Python 3.10 x64，在项目根目录创建环境：`python -m venv app/.venv`。
 2. 安装锁定依赖：`app\.venv\Scripts\python.exe -m pip install -r app/requirements-installed.txt`。
 3. 从上游项目自行取得所需处理引擎及 FFmpeg，保持上游发布目录结构，将它们放到 `app/out/`。源码仓库不含这些二进制文件。
-4. 双击 `start-web.bat`。
+4. 运行 `app\.venv\Scripts\python.exe packaging/fetch_dlss5.py` 下载并校验三套 DLL。解包 RAR 需要安装 UnRAR / WinRAR，仅构建时需要。
+5. 双击 `start-web.bat`。
 
 原始依赖项目：[DaniilSokolyuk/video2dlssnr](https://github.com/DaniilSokolyuk/video2dlssnr)。请参阅上游的运行要求及适用条款。
 
@@ -65,3 +66,13 @@ Windows 工作站已验证独立解压、包内 Python 依赖加载、EXE 服务
 准备好依赖环境与 `app/out/` 后，执行 `app\.venv\Scripts\python.exe packaging/build_package.py`，再执行 `app\.venv\Scripts\python.exe packaging/archive_package.py`。构建会从微软 NuGet 获取固定版本的 WebView2 SDK，并验证微软引导安装器签名。
 
 `packaging/verify_package.py` 会独立解压发行包，验证所有校验值，并测试唯一 EXE 的服务管理及无边框桌面窗口，包括真实图片处理、下载、最小化与关闭。该验证需要兼容显卡。
+
+## 自动显卡适配
+
+统一使用 DLSS 5 神经渲染。旧 E/F/J/K/L/M 是内部 SR 预设，并非分别验证过的 DLSS 5 模型，现已移除；内部放大阶段保持驱动默认预设。
+
+自动识别 RTX 30 / 40 / 50 系及可识别的同架构专业卡，通过 DXGI 高性能排序选择显卡，使用 CUDA LUID 核对架构，显式传入 DXGI 编号和对应 DLL 目录。每次提交任务前重新识别，避免多卡或热插拔造成编号混淆。运行时三套组件已内置，无需手动替换。未知显卡、缺失或校验失败的组件会显示原因，不会猜测其他架构 DLL。
+
+三套 DLL 来自 [purkatyy/DLSS5- 的 dlss 发布](https://github.com/purkatyy/DLSS5-/releases/tag/dlss)。下载地址、附件及 DLL 的 SHA-256 记录在 `app/dlss5-components.json`；仅提取各包中的 `nvngx_dlssnr.dll`。它们不属于本项目的 MIT 授权范围，原有版权及适用条款继续有效。
+
+已在 RTX PRO 6000 Blackwell 工作站使用 50 系 DLL 实测。30 / 40 系已有型号识别、显卡编号、组件匹配的自动化测试，尚未在实体卡上验证渲染。原发布者也注明 30 / 50 系替换包未经其测试。界面区分“已匹配”和本次启动“已成功渲染”。

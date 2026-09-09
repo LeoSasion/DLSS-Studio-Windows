@@ -31,7 +31,7 @@
     </section>
     <section class="setting-section"><label>画面风格</label><div class="segmented style-switch"><button type="button" data-style="默认" class="active">默认</button><button type="button" data-style="自然">自然</button><button type="button" data-style="电影">电影</button></div>
      <div class="range-heading"><label for="intensity">增强强度</label><input id="intensity-number" type="number" min="0" max="2" step="0.05" value="1" aria-label="增强强度数值"></div><input id="intensity" name="intensity" type="range" min="0" max="2" step="0.05" value="1"><div class="range-bounds"><span>0</span><span>2</span></div>
-     <label for="sr-preset">超分辨率模型</label><select id="sr-preset" name="sr_preset"><option>自动选择（推荐）</option></select>
+     <label>增强引擎</label><div class="engine-info glass-button" role="status" aria-live="polite"><div class="engine-heading"><strong>DLSS 5</strong><span>自动适配</span></div><span id="gpu-name">正在识别显卡…</span><span id="gpu-status">检测显卡与运行组件</span></div>
     </section>
     <details class="advanced"><summary>高级设置<img class="icon" src="/assets/icons/caret-right.svg" alt=""></summary><div class="detail-content"><label>渲染预设<select name="preset"><option>默认</option><option>预设 1</option><option>预设 2</option><option>预设 3</option></select></label><div id="advanced-sliders"></div><label class="check-row"><input type="checkbox" name="ui_correction">界面元素修正</label><label class="check-row"><input type="checkbox" name="auto_mask">自动遮罩</label><label class="check-row"><input type="checkbox" name="hdr">HDR 线性色彩</label></div></details>
     <div id="video-settings" hidden>

@@ -37,3 +37,13 @@ DLSS Studio.exe 是唯一启动入口。启动后，右上角点击“浏览器�
 
 源代码：app\web 为前端，app\studio_server.py 为服务，launcher-source\StudioService.cs 为服务进程管理源码，launcher-source\DesktopShell.cs 为独立窗口源码。
 第三方说明：licenses\。文件 SHA-256 清单：manifest.json。
+
+## 自动显卡适配
+
+统一使用 DLSS 5 神经渲染。旧 E/F/J/K/L/M 是内部 SR 预设，并非分别验证过的 DLSS 5 模型，现已移除；内部放大阶段保持驱动默认预设。
+
+自动识别 RTX 30 / 40 / 50 系及可识别的同架构专业卡，通过 DXGI 高性能排序选择显卡，使用 CUDA LUID 核对架构，显式传入 DXGI 编号和对应 DLL 目录。每次提交任务前重新识别，避免多卡或热插拔造成编号混淆。运行时三套组件已内置，无需手动替换。未知显卡、缺失或校验失败的组件会显示原因，不会猜测其他架构 DLL。
+
+三套 DLL 来自 [purkatyy/DLSS5- 的 dlss 发布](https://github.com/purkatyy/DLSS5-/releases/tag/dlss)。下载地址、附件及 DLL 的 SHA-256 记录在 `app/dlss5-components.json`；仅提取各包中的 `nvngx_dlssnr.dll`。它们不属于本项目的 MIT 授权范围，原有版权及适用条款继续有效。
+
+已在 RTX PRO 6000 Blackwell 工作站使用 50 系 DLL 实测。30 / 40 系已有型号识别、显卡编号、组件匹配的自动化测试，尚未在实体卡上验证渲染。原发布者也注明 30 / 50 系替换包未经其测试。界面区分“已匹配”和本次启动“已成功渲染”。

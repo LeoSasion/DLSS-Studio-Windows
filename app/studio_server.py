@@ -12,9 +12,10 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from PIL import Image, ImageOps
 import app as engine
+from gpu_runtime import GpuRuntime
 
 ROOT = Path(__file__).parent.resolve()
 UPLOADS = ROOT / "uploads"
@@ -40,6 +41,7 @@ def check_nvenc():
 
 
 NVENC_AVAILABLE = check_nvenc()
+GPU = GpuRuntime(ROOT)
 
 
 @api.get("/api/health")
@@ -52,12 +54,12 @@ def health():
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     asset_id: str
     size: str = "×2"
     width: int = Field(0, ge=0, le=16384)
     height: int = Field(0, ge=0, le=16384)
     scale: float = Field(2, ge=1, le=4)
-    sr_preset: str = "自动选择（推荐）"
     style: str = "默认"
     preset: str = "默认"
     intensity: float = Field(1, ge=0, le=2)
@@ -86,7 +88,7 @@ class Settings(BaseModel):
 
 @api.get("/api/options")
 def options():
-    return {"sizes": list(engine.SIZES), "sr_presets": list(engine.SR_PRESETS),
+    return {"sizes": list(engine.SIZES), "hardware": GPU.public(),
             "presets": list(engine.PRESETS), "codecs": engine.CODECS,
             "containers": engine.CONTAINERS, "nvenc_available": NVENC_AVAILABLE}
 
@@ -142,7 +144,7 @@ def asset_file(aid: str):
 
 def validate_settings(s):
     for value, allowed in [(s.size, engine.SIZES), (s.style, engine.STYLES),
-                           (s.preset, engine.PRESETS), (s.sr_preset, engine.SR_PRESETS),
+                           (s.preset, engine.PRESETS),
                            (s.codec, engine.CONTAINERS), (s.motion_engine, ["auto", "nvof", "lk"]),
                            (s.audio, engine.AUDIO), (s.prores_profile, engine.PRORES_PROFILES),
                            (s.enc_preset, [f"p{i}" for i in range(1, 8)]), (s.bit_depth, [8, 10])]:
@@ -157,8 +159,8 @@ def model_args(s):
         s.skin, s.global_tone, s.detail, s.color, s.ui_correction, s.auto_mask, s.hdr)
 
 
-def build_command(s, item, folder):
-    sr = ["--nr-sr-preset", engine.SR_PRESETS[s.sr_preset]]
+def build_command(s, item, folder, selection):
+    sr = selection.args()
     if item["kind"] == "image":
         return [engine.EXE, "--nr-run", "--in", item["path"], "--out", str(folder)] + sr + model_args(s) + \
             engine.size_args_image(item["path"], s.size, s.width, s.height, s.scale)
@@ -175,16 +177,17 @@ def build_command(s, item, folder):
     return args
 
 
-def render(jid, s, item):
+def render(jid, s, item, selection):
     job = jobs[jid]
     folder = OUTPUTS / jid
     folder.mkdir()
     try:
         job.update(status="running", message="正在初始化渲染引擎…")
-        proc = subprocess.Popen(build_command(s, item, folder), cwd=str(ROOT), stdout=subprocess.PIPE,
+        proc = subprocess.Popen(build_command(s, item, folder, selection), cwd=str(ROOT), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        lines = []
+        lines = [f"DLSS 5 · {selection.name} · {selection.profile} · DXGI {selection.adapter}",
+                 f"NR DLL SHA-256: {selection.sha256}"]
         for line in engine._stream(proc):
             lines.append(line)
             job["log"] = "\n".join(lines[-60:])[-6000:]
@@ -194,7 +197,7 @@ def render(jid, s, item):
         if code:
             log = job.get("log", "")
             if any(marker in log for marker in ["OutOfDate", "0xBAD0000C", "BAD0000C"]):
-                raise RuntimeError("显卡驱动版本过旧，无法启用神经渲染。请升级至 616.56 或更新版本后重试。")
+                raise RuntimeError("当前显卡驱动与已匹配的 DLSS 5 组件未能完成初始化，请检查驱动和处理日志。")
             if "required nvenc API version" in log or "minimum required Nvidia driver" in log:
                 raise RuntimeError("当前驱动不支持此显卡编码，请选择 CPU 编码，或更新显卡驱动后重试。")
             raise RuntimeError("处理未完成，请展开处理日志查看原因。")
@@ -202,13 +205,15 @@ def render(jid, s, item):
         if not files or not files[0].is_file():
             raise RuntimeError("渲染引擎未生成结果文件，请查看处理日志。")
         result = files[0]
+        GPU.mark_verified(selection)
         preview = result
         if item["kind"] == "video" and (s.container, s.codec) not in engine.BROWSER_PLAYABLE:
             job["message"] = "正在生成浏览器预览…"
             preview = engine.make_preview(str(result))
         job.update(status="done", message="处理完成，可以查看并下载结果。", result_path=str(result),
                    preview_path=str(preview) if preview else None,
-                   download=f"/api/jobs/{jid}/download", preview=f"/api/jobs/{jid}/preview" if preview else None)
+                   download=f"/api/jobs/{jid}/download", preview=f"/api/jobs/{jid}/preview" if preview else None,
+                   hardware=GPU.public())
     except Exception as exc:
         job.update(status="error", message=str(exc))
 
@@ -219,12 +224,16 @@ def start_job(s: Settings):
     if not item:
         raise HTTPException(400, "请先上传素材。")
     validate_settings(s)
+    try:
+        selection = GPU.prepare()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
     with mutex:
         if any(j["status"] in ["queued", "running"] for j in jobs.values()):
             raise HTTPException(409, "已有任务正在处理，请等待完成。")
         jid = uuid.uuid4().hex
         jobs[jid] = {"id": jid, "status": "queued", "message": "准备开始处理…", "log": ""}
-        worker.submit(render, jid, s, dict(item))
+        worker.submit(render, jid, s, dict(item), selection)
     return {"id": jid}
 
 

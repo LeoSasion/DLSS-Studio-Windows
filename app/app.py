@@ -38,16 +38,8 @@ OUT_DIR = os.path.join(ROOT, "ui_out")
 STYLES = {"默认": 0, "自然": 1, "电影": 2}
 PRESETS = {"默认": 0, "预设 1": 1, "预设 2": 2, "预设 3": 3}
 # DLSS Super Resolution model preset for the upscale stage. Default = the driver picks per mode;
-# E/F are the CNN models (DLSS 3.x), J/K the DLSS 4 transformer, L/M the DLSS 4.5 transformer.
-SR_PRESETS = {
-    "自动选择（推荐）": "default",
-    "E · CNN / DLSS 3.7": "E",
-    "F · CNN / 超高性能": "F",
-    "J · Transformer / DLSS 4": "J",
-    "K · Transformer / DLSS 4 默认": "K",
-    "L · Transformer / DLSS 4.5": "L",
-    "M · Transformer / DLSS 4.5 新版": "M",
-}
+# The Studio exposes only DLSS 5 NR; the internal SR stage stays on driver default.
+SR_PRESETS = {"自动选择（推荐）": "default"}
 
 # Output size presets. Fixed sizes fit inside the box keeping the aspect (a portrait clip gets the
 # box turned); "自定义" uses the width / height fields (height 0 = keep aspect).

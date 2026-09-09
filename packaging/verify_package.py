@@ -63,6 +63,9 @@ try:
     for name in ("studio.css", "dark-polish.css", "studio.js", "assets/sample-lake.png"):
         assert client.get(name).status_code == 200, name
     options = client.get("api/options").json()
+    assert "sr_presets" not in options
+    assert options["hardware"]["ready"] and options["hardware"]["model"] == "DLSS 5", options
+    report["hardware"] = options["hardware"]
     report["url"] = url
     report["nvenc_available"] = options["nvenc_available"]
     # Real renderer jobs, not mocked responses.
@@ -81,6 +84,8 @@ try:
                 break
             time.sleep(1)
         assert job["status"]=="done", job
+        assert job["hardware"]["status"] == "verified", job
+        assert options["hardware"]["profile"] in job["log"], job
         result=client.get(job["download"])
         assert result.status_code==200 and len(result.content)>100
         if job.get("preview"):

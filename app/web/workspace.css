@@ -67,3 +67,10 @@ html,body{height:100%;overflow:hidden;min-width:320px}
  .inspector.mobile-open{padding:12px}.inspector #settings-form{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
  .setting-section+.setting-section{border:0;padding:0}.inspector #video-settings{grid-column:1/-1}.inspector .size-switch button,.inspector .style-switch button{padding:4px;font-size:11px}
 }
+
+/* Read-only hardware status inherits the existing control surface. */
+.engine-info{height:auto;min-width:0;width:100%;display:grid;gap:3px;padding:8px 12px;white-space:normal;cursor:default}
+.engine-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.engine-heading strong{font-size:13px;font-weight:500}.engine-heading span{font-size:10px;color:var(--muted)}
+#gpu-name,#gpu-status{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;font-size:10px;color:var(--muted)}
+[data-theme] .engine-info:hover{filter:none;border-color:var(--border)}
+[data-theme=dark] .engine-info:hover{border-color:transparent}
