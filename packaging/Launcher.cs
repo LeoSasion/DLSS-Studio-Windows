@@ -20,6 +20,8 @@ internal sealed class StudioService : IDisposable {
     public string LogDir { get { return Path.Combine(Root, "logs"); } }
     public string Identity { get { using(var sha=SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(AppDir.ToLowerInvariant()))).Replace("-", "").ToLowerInvariant(); } }
     public int Port = 7860;
+    public string LogName = "server.log";
+    public string InstanceFile = "instance.json";
     public string Url { get { return "http://127.0.0.1:"+Port+"/"; } }
     Process process;
     IntPtr job;
@@ -42,7 +44,7 @@ internal sealed class StudioService : IDisposable {
         Directory.CreateDirectory(LogDir);
         var probe=Path.Combine(LogDir,".write-check"); File.WriteAllText(probe,"ok"); File.Delete(probe);
     }
-    public async Task Start() {
+    public async Task Start(CancellationToken cancellation = default(CancellationToken)) {
         if(Running) return;
         Validate();
         bool found=false;
@@ -51,7 +53,7 @@ internal sealed class StudioService : IDisposable {
             catch(SocketException) { }
         }
         if(!found) throw new IOException("7860–7959 端口均不可用，请关闭占用端口的程序后重试。");
-        log=new StreamWriter(Path.Combine(LogDir,"server.log"),true,new UTF8Encoding(false)); log.AutoFlush=true;
+        log=new StreamWriter(Path.Combine(LogDir,LogName),true,new UTF8Encoding(false)); log.AutoFlush=true;
         WriteLog("\n--- "+DateTime.Now.ToString("s")+" 服务启动，端口 "+Port+" ---");
         var info=new ProcessStartInfo(Path.Combine(Root,"runtime/python.exe"),"-X utf8 -u -B \""+Path.Combine(AppDir,"serve_local.py")+"\"");
         info.WorkingDirectory=AppDir; info.UseShellExecute=false; info.CreateNoWindow=true;
@@ -75,12 +77,13 @@ internal sealed class StudioService : IDisposable {
             if(!AssignProcessToJobObject(job,process.Handle)) { process.Kill(); throw new IOException("无法管理后台服务进程，请重新启动窗口。"); }
             process.BeginOutputReadLine(); process.BeginErrorReadLine();
             for(int i=0;i<120;i++) {
+                cancellation.ThrowIfCancellationRequested();
                 if(process.HasExited) throw new IOException("服务启动失败（退出码 "+process.ExitCode+"）。请点击“查看日志”。");
                 if(await Task.Run(()=>Ready())) {
-                    File.WriteAllText(Path.Combine(LogDir,"instance.json"),new JavaScriptSerializer().Serialize(new {port=Port,instance=Identity}),Encoding.UTF8);
+                    File.WriteAllText(Path.Combine(LogDir,InstanceFile),new JavaScriptSerializer().Serialize(new {port=Port,instance=Identity}),Encoding.UTF8);
                     return;
                 }
-                await Task.Delay(1000);
+                await Task.Delay(1000,cancellation);
             }
             throw new IOException("启动等待超过 120 秒，请查看日志后重试。");
         } catch { Stop(); throw; }
@@ -108,14 +111,14 @@ internal sealed class Launcher : Form {
     readonly StudioService service=new StudioService();
     Label status,address; Button start,stop,open; bool starting;
     public Launcher() {
-        Text="DLSS Studio · 启动中心"; ClientSize=new Size(620,432);
+        Text="WebUI启动器 · DLSS Studio"; ClientSize=new Size(620,432);
         FormBorderStyle=FormBorderStyle.FixedSingle; MaximizeBox=false; StartPosition=FormStartPosition.CenterScreen;
         AutoScaleMode=AutoScaleMode.Dpi; Font=new Font("Microsoft YaHei UI",10);
         BackColor=Color.FromArgb(239,241,244); ForeColor=Color.FromArgb(32,44,59);
         Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         var title=new Label{Text="DLSS Studio",Font=new Font(Font.FontFamily,25,FontStyle.Bold),Location=new Point(30,25),Size=new Size(480,50)};
         Controls.Add(title);
-        Controls.Add(new Label{Text="影像增强工作台   /   一键启动",Location=new Point(33,80),Size=new Size(500,26),ForeColor=Color.FromArgb(104,114,128)});
+        Controls.Add(new Label{Text="WebUI启动器   /   在浏览器中打开工作台",Location=new Point(33,80),Size=new Size(500,26),ForeColor=Color.FromArgb(104,114,128)});
         var card=new Panel{Location=new Point(30,128),Size=new Size(560,96),BackColor=Color.White};
         card.Paint+=(s,e)=>{using(var pen=new Pen(Color.FromArgb(220,225,231))) e.Graphics.DrawRectangle(pen,0,0,card.Width-1,card.Height-1);};
         status=new Label{Text="准备就绪",Font=new Font(Font.FontFamily,14,FontStyle.Bold),Location=new Point(20,17),Size=new Size(520,30)};

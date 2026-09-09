@@ -1,0 +1,10 @@
+.desktop-shell .desktop-actions{display:flex;align-items:center;gap:18px;justify-self:end;min-width:0}
+.desktop-shell .desktop-window-controls{display:flex;gap:3px;padding-left:12px;border-left:1px solid var(--line)}
+.desktop-shell .desktop-window-controls button{display:grid;place-items:center;width:32px;height:34px;border-radius:7px;color:var(--muted)}
+.desktop-shell .desktop-window-controls .icon{width:18px;height:18px}
+.desktop-shell .window-minimize:hover{background:#8098b026}
+.desktop-shell .window-close:hover{background:#db4848}
+.desktop-shell .window-close:hover .icon{filter:brightness(0) invert(1)}
+.desktop-shell .topbar{user-select:none}
+.desktop-shell .brand{font-size:22px}
+@media(min-width:901px){.desktop-shell .mode-tabs{gap:26px}.desktop-shell .theme-switch{width:112px;height:38px}.desktop-shell .studio{padding-top:14px}}

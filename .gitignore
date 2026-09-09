@@ -25,3 +25,13 @@ publication/
 # Local publication planning, not project source.
 PUBLISHING.md
 RELEASE-NOTES.md
+
+# Embedded browser profile and packaged WebView2 installer.
+desktop-profile/
+components/
+*.nupkg
+
+/desktop-*.png
+/desktop-smoke-result.txt
+/smoke-*.txt
+/launcher-preview.png

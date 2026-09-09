@@ -4,10 +4,10 @@
 
 项目维护者已选择 MIT 许可，全文见 [LICENSE](LICENSE)。该许可适用于 DLSS-Studio-Windows 贡献者原创的界面、服务桥接、启动器、构建脚本和文档，包括：
 
-- `app/web/index.html`、`app/web/studio.css`、`app/web/dark-polish.css`、`app/web/studio.js`。
+- `app/web/index.html`、`app/web/studio.css`、`app/web/dark-polish.css`、`app/web/studio.js`、`app/web/desktop-shell.js`、`app/web/desktop-shell.css`。
 - `app/studio_server.py`、`app/serve_local.py`、`app/ui_style.py`、`app/test_studio_server.py`。
 - `start_studio.py`、`start-web.bat`。
-- `packaging/Launcher.cs`、本项目原创的打包与验证脚本。
+- `packaging/Launcher.cs`、`packaging/DesktopShell.cs`、本项目原创的打包与验证脚本。
 - 本项目原创文档；不包括其中引用的第三方文本。
 
 上述 MIT 许可仅授予本项目贡献者有权授予的权利，不改变以下第三方内容的许可，也不为包含它们的整个发行包授予统一的 MIT 许可。
@@ -29,3 +29,5 @@
 - **示例图片**：本项目制作流程中生成的演示素材，不属于上游渲染结果。
 
 本项目并非 NVIDIA 官方产品。MIT 许可不授予第三方商标权。
+
+- **Microsoft WebView2**：SDK 与运行时引导组件遵循微软各自的适用许可；便携包保留 `licenses/WebView2-LICENSE.txt` 和 `licenses/WebView2-NOTICE.txt`，不纳入本项目 MIT 授权。

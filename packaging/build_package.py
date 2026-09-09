@@ -60,13 +60,8 @@ This ZIP packages the existing project and its verified dependencies; it does no
 """, encoding="utf-8")
 result = subprocess.run([str(app / "out/ffmpeg.exe"), "-L"], capture_output=True, text=True, errors="replace")
 (licenses / "ffmpeg-license.txt").write_text(result.stdout + result.stderr, encoding="utf-8")
-source_dir = PACKAGE / "launcher-source"
-source_dir.mkdir()
-shutil.copy2(ROOT / "packaging/Launcher.cs", source_dir / "Launcher.cs")
-compiler = Path("C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe")
-subprocess.run([str(compiler), "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/codepage:65001",
-    "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll",
-    "/out:" + str(PACKAGE / "DLSS Studio.exe"), str(ROOT / "packaging/Launcher.cs")], check=True)
+from build_launchers import build_launchers
+build_launchers(PACKAGE, ROOT)
 (PACKAGE / "启动工作台.bat").write_bytes('@echo off\r\ncd /d "%~dp0"\r\nstart "" "DLSS Studio.exe"\r\n'.encode("ascii"))
 manifest = {}
 for file in sorted(PACKAGE.rglob("*")):
