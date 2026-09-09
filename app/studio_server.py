@@ -7,6 +7,7 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
+from typing import Literal, get_args
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -53,20 +54,20 @@ def health():
     return {"app": "dlss-studio", "instance": instance, "busy": busy}
 
 
+OutputSize = Literal["原始尺寸（不放大）", "720p (1280×720)", "1080p (1920×1080)", "1440p (2560×1440)", "4K (3840×2160)"]
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str
-    size: str = "×2"
-    width: int = Field(0, ge=0, le=16384)
-    height: int = Field(0, ge=0, le=16384)
-    scale: float = Field(2, ge=1, le=4)
+    size: OutputSize = "原始尺寸（不放大）"
     style: str = "默认"
     preset: str = "默认"
     intensity: float = Field(1, ge=0, le=2)
     local_structure: float = Field(1, ge=0, le=2)
     local_tone: float = Field(1, ge=0, le=2)
-    skin: float = Field(-1, ge=-1, le=2)
-    global_tone: float = Field(-1, ge=-1, le=2)
+    skin: float = Field(1, ge=0, le=2)
+    global_tone: float = Field(1, ge=0, le=2)
     detail: float = Field(1, ge=0, le=2)
     color: float = Field(1, ge=0, le=1)
     ui_correction: bool = False
@@ -88,7 +89,7 @@ class Settings(BaseModel):
 
 @api.get("/api/options")
 def options():
-    return {"sizes": list(engine.SIZES), "hardware": GPU.public(),
+    return {"sizes": list(get_args(OutputSize)), "hardware": GPU.public(),
             "presets": list(engine.PRESETS), "codecs": engine.CODECS,
             "containers": engine.CONTAINERS, "nvenc_available": NVENC_AVAILABLE}
 
@@ -163,13 +164,13 @@ def build_command(s, item, folder, selection):
     sr = selection.args()
     if item["kind"] == "image":
         return [engine.EXE, "--nr-run", "--in", item["path"], "--out", str(folder)] + sr + model_args(s) + \
-            engine.size_args_image(item["path"], s.size, s.width, s.height, s.scale)
+            engine.size_args_image(item["path"], s.size, 0, 0, 1)
     out = folder / ("result." + s.container)
     args = [os.sys.executable, engine.NRV, "--in", item["path"], "--out", str(out),
             "--nr-motion-engine", s.motion_engine, "--nr-motion", "1" if s.motion else "0",
             "--codec", s.codec, "--enc-preset", s.enc_preset, "--bit-depth", str(s.bit_depth),
             "--prores-profile", s.prores_profile, "--audio", s.audio, "--cq", str(s.cq),
-            "--bitrate", str(s.bitrate)] + sr + model_args(s) + engine.size_args_video(s.size, s.width, s.height, s.scale)
+            "--bitrate", str(s.bitrate)] + sr + model_args(s) + engine.size_args_video(s.size, 0, 0, 1)
     if s.motion_vis:
         args.append("--nr-motion-vis")
     if s.frames:

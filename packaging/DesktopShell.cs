@@ -138,7 +138,7 @@ internal sealed class DesktopShell : Form {
     async Task SmokeTest(){
         try {
             var core=web.CoreWebView2;
-            if(!await Check("document.querySelector('.desktop-window-controls') && document.querySelector('#source-image').naturalWidth>0",20))throw new Exception("Native controls or image missing");
+            if(!await Check("document.querySelector('.desktop-window-controls') && !document.querySelector('#empty-state').hidden",20))throw new Exception("Native controls or upload area missing");
             var normalSize=Size;Size=MinimumSize;await Task.Delay(250);
             if(!await Check("document.documentElement.scrollWidth<=innerWidth && document.documentElement.scrollHeight<=innerHeight && document.querySelector('.window-close').getBoundingClientRect().right<=innerWidth && document.querySelector('.inspector').scrollHeight<=document.querySelector('.inspector').clientHeight && document.querySelector('.open-browser')",3))throw new Exception("Compact window overflow");
             await core.ExecuteScriptAsync("document.querySelector('[data-mode=video]').click();document.querySelector('#video-settings details:last-child summary').click()");
@@ -146,8 +146,8 @@ internal sealed class DesktopShell : Form {
             await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click()");
             await Task.Delay(100);
             if(!await Check("document.querySelector('.inspector').scrollHeight<=document.querySelector('.inspector').clientHeight",3))throw new Exception("Video inspector overflow");
-            await core.ExecuteScriptAsync("document.querySelector('[data-mode=image]').click();document.querySelector('#custom-details summary').click()");
-            if(!await Check("document.querySelector('#settings-dialog').open && document.querySelector('#settings-form').elements.width",3))throw new Exception("Custom settings dialog failed");
+            await core.ExecuteScriptAsync("document.querySelector('[data-mode=image]').click();document.querySelector('.advanced summary').click()");
+            if(!await Check("document.querySelector('#settings-dialog').open && document.querySelector('#settings-form').elements.local_structure",3))throw new Exception("Advanced settings dialog failed");
             await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click()");
             await Task.Delay(100);
             Size=normalSize;await Task.Delay(250);

@@ -73,4 +73,43 @@ html,body{height:100%;overflow:hidden;min-width:320px}
 .engine-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.engine-heading strong{font-size:13px;font-weight:500}.engine-heading span{font-size:10px;color:var(--muted)}
 #gpu-name,#gpu-status{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;font-size:10px;color:var(--muted)}
 [data-theme] .engine-info:hover{filter:none;border-color:var(--border)}
-[data-theme=dark] .engine-info:hover{border-color:transparent}
+[data-theme=dark] .engine-info:hover{border-color:transparent;box-shadow:inset 0 0 0 .5px #43828f,0 2px 3px #0005}
+
+.settings-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
+
+/* Keep upload and preview controls together; expand settings only when they fit. */
+.preview-actions{display:flex;align-items:center;gap:10px;justify-self:end;min-width:0}
+.preview-actions .view-switch{margin:0;width:auto;order:initial;flex-shrink:0}
+.preview-actions .replace,.preview-actions .view-switch{height:34px}
+#settings-form{flex:0 0 auto}
+.inspector .inline-settings>.detail-content{display:grid;gap:12px;padding:14px 0 2px}
+.inspector .inline-settings .advanced-range,.inspector .inline-settings .detail-content label{margin:0}
+.inspector .inline-settings .advanced-range label{gap:8px}
+.inspector .inline-settings .check-row{min-height:22px}
+.inspector .inline-settings>summary{cursor:default}
+.inspector .inline-settings>summary>.icon{display:none}
+#video-settings>.inline-settings{grid-column:1/-1}
+.inline-restore{display:flex;justify-content:flex-end}
+.inline-restore button{height:30px;padding:0 12px;font-size:12px}
+#settings-dialog .inline-restore{display:none}
+@media(max-width:1100px){
+ .canvas-toolbar{grid-template-columns:minmax(0,1fr) auto}
+ .canvas-toolbar .file-info{grid-column:1/-1}
+ .preview-actions{grid-column:1;grid-row:2;justify-self:start}
+ .canvas-toolbar .mobile-settings{grid-column:2;grid-row:2}
+}
+@media(max-width:480px){
+ .preview-actions{gap:6px}.preview-actions .replace{padding:0 8px;gap:5px}
+ .preview-actions .view-switch button{min-width:0;padding:4px 7px;font-size:11px}
+ .canvas-toolbar .mobile-settings{grid-column:2;grid-row:1;padding:0 8px}
+ .canvas-toolbar .file-info{grid-column:1}
+ .preview-actions{grid-column:1/-1}
+}
+
+/* Reset belongs to the parameter heading inline, and the left side of the dialog footer. */
+.inspector .inline-settings{position:relative}
+.inspector .inline-settings.advanced>summary{padding-right:94px}
+.inspector .inline-settings .inline-restore{position:absolute;right:6px;top:0;height:30px;align-items:center}
+.inspector .inline-settings .inline-restore button{height:24px;padding:0 8px;font-size:11px}
+.settings-actions{flex:1}
+.settings-actions .restore{margin-right:auto}

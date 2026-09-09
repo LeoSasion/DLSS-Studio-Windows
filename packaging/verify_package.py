@@ -75,7 +75,7 @@ try:
         response.raise_for_status()
         item=response.json()
         assert item["kind"] == kind
-        response=client.post("api/jobs", json={"asset_id":item["id"],"size":"×2",**extra})
+        response=client.post("api/jobs", json={"asset_id":item["id"],"size":"1080p (1920×1080)",**extra})
         response.raise_for_status()
         jid=response.json()["id"]
         for _ in range(100):

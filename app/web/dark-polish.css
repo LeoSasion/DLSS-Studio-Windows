@@ -7,25 +7,36 @@
   --line:#ffffff12;
   --border:#829ca33b;
   --muted:#9ba7b3;
-  --edge:linear-gradient(118deg,#d8ffff 0%,#759eae 3%,#18252c 12%,#0d131a 32%,#668c94 47%,#dcf5f1 49%,#787697 50%,#17212b 54%,#0b1015 76%,#538478 91%,#c4f5e5 96%,#23363c 100%);
+  /* Blend the original spectral edges with the newer, readable cyan shadow tones. */
+  --edge:linear-gradient(118deg,#efffff 0%,#91bac8 3%,#285e6c 12%,#07525e 32%,#86b1ba 47%,#f2ffff 49%,#a292bd 50%,#345971 54%,#07505d 76%,#488b92 91%,#e0fff3 96%,#356d78 100%);
+  --glint-a:7% 0%;
+  --glint-b:93% 100%;
   --face:linear-gradient(116deg,#131b20 0%,#080c10 7%,#030507 24%,#020305 64%,#060b0d 100%);
   --glass-shadow:inset 0 0 0 1px #000b,0 12px 24px #0007;
 }
 [data-theme=dark] body{background:var(--bg)}
 [data-theme=dark] .glass{
   border-color:transparent;
-  background:var(--face) padding-box,var(--edge) border-box;
+  /* Specular highlights stay inside the border; the card face remains clear and dark. */
+  background:var(--face) padding-box,
+    radial-gradient(ellipse 58px 16px at var(--glint-a),#ffffff 0%,#f0ffff 9%,#d9ffffb3 32%,transparent 100%) border-box,
+    radial-gradient(ellipse 44px 12px at var(--glint-b),#f2ffff 0%,#ddefff 10%,#bcaee799 30%,transparent 100%) border-box,
+    var(--edge) border-box;
   box-shadow:var(--glass-shadow);
   backdrop-filter:none;
   -webkit-backdrop-filter:none;
 }
 [data-theme=dark] .inspector{
   --face:linear-gradient(132deg,#141c20 0%,#070b0e 7%,#020406 23%,#020304 78%,#070c0e 100%);
-  --edge:linear-gradient(142deg,#e3ffff 0%,#5f9a99 5%,#171e29 17%,#090e14 38%,#718594 56%,#beb9d0 57%,#293742 60%,#0b1116 80%,#68a39e 94%,#e0fff1 100%);
+  --edge:linear-gradient(142deg,#f4ffff 0%,#82b5bf 5%,#34566d 17%,#064d5b 38%,#8eabc1 56%,#d5c8e9 57%,#456c82 60%,#07525e 80%,#70aaae 94%,#effff8 100%);
+  --glint-a:15% 0%;
+  --glint-b:100% 83%;
 }
 [data-theme=dark] .topbar{
   --face:linear-gradient(112deg,#131c22 0%,#05080b 11%,#020305 50%,#080e10 100%);
-  --edge:linear-gradient(104deg,#d4faff 0%,#668ca2 6%,#192128 20%,#080b10 36%,#293f45 54%,#b8e4d6 67%,#e0d9e6 69%,#35444c 73%,#0d171b 90%,#81b7ac 100%);
+  --edge:linear-gradient(104deg,#efffff 0%,#88afc4 6%,#355f73 20%,#074f5e 36%,#457e8b 54%,#d1f4ec 67%,#e5d8f2 69%,#617d98 73%,#075865 90%,#aad9d3 100%);
+  --glint-a:69% 0%;
+  --glint-b:9% 100%;
 }
 [data-theme=dark] .output-bar{--face:linear-gradient(114deg,#121b20,#030507 17%,#020305 67%,#07100e)}
 [data-theme=dark] .canvas{background:transparent;box-shadow:none}
@@ -34,27 +45,26 @@
 [data-theme=dark] select,
 [data-theme=dark] input[type=number],
 [data-theme=dark] summary{
+  /* Fractional inset strokes stay fine at 1x DPI without rounding a CSS border to 1px. */
   border-color:transparent;
-  background:linear-gradient(166deg,#19252c 0%,#070d11 17%,#020406 49%,#05090c 100%) padding-box,
-    linear-gradient(120deg,#92bcc5,#1d303b 19%,#101820 46%,#64717e 66%,#202b34 73%,#081014 90%,#41675e) border-box;
-  box-shadow:inset 0 0 0 1px #0008,0 2px 3px #0005;
+  background:linear-gradient(166deg,#19252c 0%,#070d11 17%,#020406 49%,#05090c 100%) border-box;
+  box-shadow:inset 0 0 0 .5px #43828f,0 2px 3px #0005;
 }
 [data-theme=dark] .segmented button.active{
   border-color:transparent;
-  background:linear-gradient(158deg,#376158 0%,#102b24 12%,#03100d 38%,#010705 70%,#0d2b21 100%) padding-box,
-    linear-gradient(122deg,#f2fff5 0%,#85ffd9 9%,#163f36 28%,#0b261d 45%,#77bca2 66%,#dbf7ff 68%,#468a81 71%,#13372c 87%,#8cffbd 100%) border-box;
-  box-shadow:inset 0 0 0 1px #0006,-2px -1px 6px #67ffd51c,3px 2px 7px #77ffc318;
+  background:linear-gradient(158deg,#376158 0%,#102b24 12%,#03100d 38%,#010705 70%,#0d2b21 100%) border-box;
+  box-shadow:inset 0 0 0 .5px #c3efe6,0 0 8px #67ffd51c;
   text-shadow:none;
 }
 [data-theme=dark] .start-button{
   border-color:transparent;
   background:linear-gradient(161deg,#3e655e 0%,#152f29 8%,#04120e 25%,#010705 64%,#082017 90%,#163c2b 100%) padding-box,
-    linear-gradient(115deg,#effff8 0%,#88ffd3 7%,#295c4c 23%,#102f25 41%,#569777 57%,#c8ffff 65%,#91a3c2 67%,#254e44 72%,#153b29 89%,#a1ffd3 100%) border-box;
+    linear-gradient(115deg,#f4fffc 0%,#a0f7db 7%,#397c79 23%,#075460 41%,#73aaa8 57%,#eeffff 65%,#b7afd3 67%,#477d91 72%,#075c68 89%,#baffdf 100%) border-box;
   box-shadow:inset 0 0 0 1px #00160d,0 0 4px #87ffda20,-4px -2px 16px #67f9c719,5px 4px 14px #71ffb317;
 }
 [data-theme=dark] .start-button:hover:not(:disabled){filter:brightness(1.2);box-shadow:inset 0 0 0 1px #193d2d,-4px -2px 18px #67f9c72b,5px 4px 18px #71ffb326}
 [data-theme=dark] .start-button:disabled{opacity:.5;box-shadow:inset 0 0 0 1px #0008}
-[data-theme=dark] .glass-button:hover{border-color:transparent;filter:brightness(1.3)}
+[data-theme=dark] .glass-button:hover{border-color:transparent;box-shadow:inset 0 0 0 .5px #c5fbff,0 2px 3px #0005;filter:brightness(1.15)}
 [data-theme=dark] .range-heading input{background:transparent;border-color:transparent;box-shadow:none}
 [data-theme=dark] .image-label,
 [data-theme=dark] #compare-line span{backdrop-filter:none;-webkit-backdrop-filter:none;background:linear-gradient(145deg,#243038e8,#04090eed);box-shadow:inset 0 1px #deffff4d}
