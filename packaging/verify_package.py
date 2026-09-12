@@ -23,11 +23,15 @@ for name, entry in manifest.items():
     assert len(data) == entry["bytes"] and hashlib.sha256(data).hexdigest() == entry["sha256"], name
 print("PASS: extracted ZIP and checked every payload checksum", flush=True)
 env = os.environ.copy()
+env["DLSS_STUDIO_TEST_VIDEO"] = str(ROOT / "tests/fixtures/video-compare.mp4")
+env["DLSS_STUDIO_TEST_WORKBENCH"] = str(ROOT / "tests/workbench-workflow.js")
 for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
     env.pop(key, None)
 env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
 runtime_result = subprocess.check_output([str(package / "runtime/python.exe"), "-B", "-c",
-    "import sys,json;import PIL,numpy,gradio,uvicorn;print(json.dumps({'paths':sys.path,'python':sys.executable}))"],
+    "import sys,json;import PIL,numpy,uvicorn,studio_server;"
+    "assert not any(m=='gradio' or m.startswith('gradio.') for m in sys.modules);"
+    "print(json.dumps({'paths':sys.path,'python':sys.executable,'gradio_loaded':False}))"],
     env=env, cwd=validation, text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW)
 runtime = json.loads(runtime_result.strip().splitlines()[-1])
 assert all(Path(p).is_relative_to(package) for p in runtime["paths"]), runtime
@@ -60,7 +64,8 @@ try:
     health = client.get("api/health").json()
     assert health["app"] == "dlss-studio"
     assert client.get("").status_code == 200
-    for name in ("studio.css", "dark-polish.css", "studio.js", "assets/sample-lake.png"):
+    for name in ("studio.css", "dark-polish.css", "glass-mode.css", "studio.js", "history.js",
+                 "preview-zoom.js", "video-player.js", "workbench.css", "assets/sample-lake.png"):
         assert client.get(name).status_code == 200, name
     options = client.get("api/options").json()
     assert "sr_presets" not in options
@@ -107,7 +112,7 @@ report["launcher"]=(package / "smoke-result.txt").read_text(encoding="utf-8-sig"
 assert not (package / "WebUI启动器.exe").exists()
 desktop = subprocess.Popen([str(package / "DLSS Studio.exe"), "--desktop-smoke-test"],
     cwd=validation, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
-desktop.wait(timeout=180)
+desktop.wait(timeout=420)
 desktop_result=(package / "desktop-smoke-result.txt").read_text(encoding="utf-8-sig")
 assert desktop.returncode==0 and desktop_result.startswith("PASS:"),desktop_result
 import re
@@ -120,6 +125,9 @@ else:
     raise AssertionError("Desktop service still running after window closed")
 report["desktop"]=desktop_result+"; verified service stopped after close"
 report["desktop_preview"]=str(package / "desktop-result.png")
+report["desktop_video"] = json.loads((package / "desktop-video-diagnostics.json").read_text(encoding="utf-8-sig"))
+report["desktop_workbench"] = json.loads((package / "desktop-workbench-diagnostics.json").read_text(encoding="utf-8-sig"))
+assert report["desktop_workbench"]["done"] and not report["desktop_workbench"]["error"], report["desktop_workbench"]
 print(report["desktop"],flush=True)
 (ROOT / "outputs/package-verification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2),encoding="utf-8")
 print(report["launcher"],flush=True)

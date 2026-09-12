@@ -34,7 +34,7 @@ base = Path(json.loads(subprocess.check_output([str(ROOT / "app/.venv/Scripts/py
 shutil.copytree(base / "Lib/distutils", runtime / "Lib/distutils", ignore=ignore)
 app = PACKAGE / "app"
 app.mkdir()
-for name in ("app.py", "nr_video.py", "ui_style.py", "studio_server.py", "serve_local.py", "gpu_runtime.py", "dlss5-components.json", "requirements-installed.txt"):
+for name in ("app.py", "nr_video.py", "render_engine.py", "process_runner.py", "studio_storage.py", "ui_style.py", "studio_server.py", "serve_local.py", "gpu_runtime.py", "dlss5-components.json", "requirements-installed.txt"):
     shutil.copy2(ROOT / "app" / name, app / name)
 for name in ("out", "web"):
     shutil.copytree(ROOT / "app" / name, app / name, ignore=ignore)

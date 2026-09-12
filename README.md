@@ -7,14 +7,16 @@
 ## 功能
 
 - DLSS 5 图片与视频增强，自动识别显卡并加载适配组件，无需手动选择模型。
-- 图片原图、结果与拖动对比；视频预览与文件下载。首次打开显示上传区。
+- 图片原图、结果与拖动对比；视频同步播放对比、进度拖动、暂停画面的单帧测试与完整视频下载。首次打开显示上传区。
+- 预览支持适应窗口、100% 原像素、滚轮缩放与键盘/鼠标平移；视频的 100% 指当前预览文件的像素，预览分辨率可能小于下载结果。
 - 仅提供原始、720p、1080p、2K（1440p）、4K，保持素材比例；原始保留原尺寸。
-- 高级强度显示百分比，提供恢复默认及参数悬停说明。
-- 深色光泽折射边缘、浅色中性微渐变与阴影、透明预览背景；主界面适配窗口，参数按可用空间自动展开，不足时使用分页面板。
-- `DLSS Studio.exe`：内嵌 WebView2，直接显示完整工作台，无系统边框；支持拖动、调整大小、右上角最小化和关闭。
-- 独立窗口右上角“浏览器”可打开同一 Web 服务，无需第二个启动器。关闭独立窗口会停止服务；外部浏览器与独立窗口的当前素材和预览独立保存。
+- 高级强度显示百分比，保留 0%–200% 调节范围（色彩融合为 0%–100%），提供恢复默认及参数悬停说明。
+- 深浅主题与独立窗口玻璃效果；最大化时背景不透明，还原后恢复玻璃。主界面适配窗口和 200% 显示缩放，窄屏使用设置抽屉。
+- `DLSS Studio.exe`：内嵌 WebView2，直接显示完整工作台，无系统边框；支持拖动、调整大小、最小化、最大化/还原和关闭。
+- 处理进度、取消任务、断连重试、刷新恢复；最近结果可重新打开和下载，缓存管理默认保留成功结果。
+- 独立窗口右上角“浏览器”可打开同一 Web 服务。关闭独立窗口会停止服务；外部浏览器与独立窗口分别保存当前工作台，共用处理队列与最近结果。
 - 默认端口被占用时自动选择可用端口，仅监听 `127.0.0.1`。
-- 检查显卡编码可用性，不可用时默认采用 ProRes CPU 编码。
+- 按旋转信息正确处理竖拍视频；导出参数按编码显示，检查显卡编码可用性，不可用时默认采用 ProRes CPU 编码。
 
 ![独立桌面窗口](docs/desktop.png)
 
@@ -22,9 +24,11 @@
 
 ## 下载与使用
 
-发行包使用 [GitHub Releases](https://github.com/LeoSasion/DLSS-Studio-Windows/releases) 分发。请下载 Release 附件中的 `DLSS-Studio-Windows-x64.zip`，而不是 GitHub 自动生成的 Source code 压缩包。Gitee 镜像尚未配置。
+当前版本：[v1.1.0](https://github.com/LeoSasion/DLSS-Studio-Windows/releases/tag/v1.1.0)。下载 Release 附件中的 `DLSS-Studio-Windows-x64.zip`，内含已编译 EXE 与运行环境；GitHub 自动生成的 Source code 压缩包仅包含源码。附件同时提供 SHA-256 校验文件。
 
 获取发行包后，完整解压 ZIP，双击 `DLSS Studio.exe` 直接进入独立窗口。需要外部浏览器时，点击窗口右上角“浏览器”，并保持独立窗口开启或最小化。Python 运行环境随发行包提供。独立窗口还使用 Microsoft WebView2；缺少时可选择通过包内微软引导程序联网安装。
+
+从旧版升级时，将新版解压到新文件夹。需要保留素材和历史结果时，先退出旧版，再将旧目录的 `app/uploads/`、`app/ui_out/` 和已有的 `app/studio-state.json` 一起复制到新目录。v1.0.0 没有任务索引，旧文件可保留，但不会自动出现在「最近结果」中。不要用旧版程序文件覆盖新版。
 
 ### 浏览器访问地址与端口
 
@@ -52,17 +56,20 @@ Windows x64；DLSS 神经渲染需要兼容的 NVIDIA 显卡与驱动。CPU 编�
 | 目录或文件 | 用途 |
 | --- | --- |
 | `app/web/` | 中文前端与主题 |
-| `app/studio_server.py` | 上传、任务队列、处理引擎桥接与下载服务 |
-| `app/app.py`、`app/nr_video.py` | 上游代码及本地适配，许可待确认 |
+| `app/studio_server.py` | 上传、进度、取消、历史记录与下载 API |
+| `app/studio_storage.py`、`app/process_runner.py` | 任务持久化与处理进程管理 |
+| `app/app.py`、`app/nr_video.py`、`app/render_engine.py` | 上游代码及本地适配，许可待确认 |
 | `packaging/DesktopShell.cs` | 无边框 WebView2 桌面窗口 |
 | `packaging/StudioService.cs` | 服务进程管理 |
 | `packaging/` | 便携包构建脚本与使用说明 |
 
-上传素材保存在 `app/uploads/`，结果保存在 `app/ui_out/`。以上目录、Python 运行环境和发行 ZIP 均排除在源码仓库之外。
+上传素材保存在 `app/uploads/`，结果保存在 `app/ui_out/`，任务索引保存在 `app/studio-state.json`。以上数据、浏览器配置、日志、Python 运行环境和发行 ZIP 均排除在源码仓库之外。
 
 ## 验证情况
 
-Windows 工作站已验证独立解压、包内 Python 依赖加载、EXE 服务启停、端口占用自动切换，以及保持比例的 1080p 图片增强和短视频 ProRes 导出。独立窗口另行验证深浅主题、上传、处理、对比、下载、最小化及关闭清理。未声称所有显卡、驱动或长视频均已测试。
+23 项自动化测试覆盖显卡匹配、参数边界、任务取消和恢复、进程树清理、缓存保留及旋转视频尺寸。Windows 工作站另行验证独立解压、包内 Python 依赖加载、EXE 服务启停、端口占用自动切换，以及真实图片增强和短视频 ProRes 导出。
+
+独立窗口回归覆盖同步视频对比、单帧测试、缩放和平移、断连重试、刷新恢复、历史下载、深浅主题、玻璃效果、最大化/还原和 200% 显示缩放。实机为 RTX PRO 6000 Blackwell；30 / 40 系、其他驱动和长视频未全部实测。
 
 ## 来源和许可
 
@@ -76,7 +83,9 @@ Windows 工作站已验证独立解压、包内 Python 依赖加载、EXE 服务
 
 准备好依赖环境与 `app/out/` 后，执行 `app\.venv\Scripts\python.exe packaging/build_package.py`，再执行 `app\.venv\Scripts\python.exe packaging/archive_package.py`。构建会从微软 NuGet 获取固定版本的 WebView2 SDK，并验证微软引导安装器签名。
 
-`packaging/verify_package.py` 会独立解压发行包，验证所有校验值，并测试唯一 EXE 的服务管理及无边框桌面窗口，包括真实图片处理、下载、最小化与关闭。该验证需要兼容显卡。
+运行 `app\.venv\Scripts\python.exe -B -m unittest discover -s tests -p "test_*.py"` 执行自动化测试；其中视频几何测试需要 `app/out/` 下的 FFmpeg 和 FFprobe。
+
+`packaging/verify_package.py` 会独立解压发行包，验证所有校验值，并测试 EXE 的服务管理及桌面窗口，包括真实图片/视频处理、恢复与历史结果工作流、窗口控制和关闭清理。该验证需要兼容显卡，结果写入 `outputs/package-verification.json`。重建已有暂存包时应先保留或移走 `packaging/build/DLSS-Studio-Portable/`，构建脚本会拒绝覆盖非空目录。
 
 ## 自动显卡适配
 

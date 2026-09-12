@@ -9,7 +9,9 @@ manifest = {}
 for file in sorted(package.rglob("*")):
     if file.is_file() and file.name != "manifest.json":
         name = file.relative_to(package).as_posix()
-        assert not any(part in {"__pycache__", "uploads", "ui_out", "logs", "desktop-profile"} for part in file.relative_to(package).parts), name
+        assert not any(part in {"__pycache__", "uploads", "ui_out", "logs", "desktop-profile", "desktop-smoke-profile"} for part in file.relative_to(package).parts), name
+        assert file.name not in {"studio-state.json", "studio-state.json.tmp"}, name
+        assert not file.name.endswith((".previous", ".bak", ".log", ".pid")), name
         manifest[name] = {"bytes":file.stat().st_size,"sha256":hashlib.sha256(file.read_bytes()).hexdigest()}
 (package / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 target = root / "outputs/DLSS-Studio-Windows-x64.zip"

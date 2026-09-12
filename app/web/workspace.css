@@ -113,3 +113,22 @@ html,body{height:100%;overflow:hidden;min-width:320px}
 .inspector .inline-settings .inline-restore button{height:24px;padding:0 8px;font-size:11px}
 .settings-actions{flex:1}
 .settings-actions .restore{margin-right:auto}
+
+/* Compact hardware status beside the brand. */
+.brand-group{display:flex;align-items:center;gap:16px;min-width:0}
+.brand-group .brand{flex-shrink:0}
+.engine-status{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;color:var(--muted);font-size:11px;cursor:help}
+.engine-status #gpu-status{font-size:11px;color:inherit}
+.engine-dot{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--muted)}
+.engine-status[data-ready=true] .engine-dot{background:var(--mint)}
+.engine-status[data-ready=false] .engine-dot{background:#d99172}
+@media(max-width:1100px){.brand-group{gap:10px}.engine-status,.engine-status #gpu-status{font-size:10px}}
+@media(max-width:760px){.brand-group{grid-column:1;grid-row:1;gap:8px}.brand-group .brand,.desktop-shell .brand-group .brand{font-size:16px}.brand-group .brand-icon{width:20px;height:20px}}
+
+/* Give the GPU model its own space without crowding the brand or navigation. */
+.topbar{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+.brand-group{gap:28px}
+.engine-status{padding-left:18px;border-left:1px solid var(--line);gap:8px;max-width:300px;font-size:12px}
+.engine-status #gpu-status{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1100px){.brand-group{gap:24px}.engine-status{padding-left:16px;max-width:240px}.engine-status,.engine-status #gpu-status{font-size:11px}}
+@media(max-width:760px){.topbar{grid-template-columns:minmax(0,1fr) auto}.brand-group{gap:16px}.engine-status{padding-left:12px;max-width:220px}}

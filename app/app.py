@@ -29,121 +29,9 @@ import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nr_video import find_tool  # noqa: E402  (same ffmpeg lookup as the video script)
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-EXE = os.path.join(ROOT, "out", "video2dlssnr.exe")
-NRV = os.path.join(ROOT, "nr_video.py")
-OUT_DIR = os.path.join(ROOT, "ui_out")
-# nvngx_dlssnr.dll is expected next to video2dlssnr.exe; the tool finds it there on its own.
-
-STYLES = {"默认": 0, "自然": 1, "电影": 2}
-PRESETS = {"默认": 0, "预设 1": 1, "预设 2": 2, "预设 3": 3}
-# DLSS Super Resolution model preset for the upscale stage. Default = the driver picks per mode;
-# The Studio exposes only DLSS 5 NR; the internal SR stage stays on driver default.
-SR_PRESETS = {"自动选择（推荐）": "default"}
-
-# Output size presets. Fixed sizes fit inside the box keeping the aspect (a portrait clip gets the
-# box turned); "自定义" uses the width / height fields (height 0 = keep aspect).
-SIZES = {
-    "原始尺寸（不放大）": ("scale", 1.0),
-    "×1.5": ("scale", 1.5),
-    "×2": ("scale", 2.0),
-    "×3": ("scale", 3.0),
-    "720p (1280×720)": ("fit", "1280x720"),
-    "1080p (1920×1080)": ("fit", "1920x1080"),
-    "1440p (2560×1440)": ("fit", "2560x1440"),
-    "4K (3840×2160)": ("fit", "3840x2160"),
-    "5K (5120×2880)": ("fit", "5120x2880"),
-    "8K (7680×4320)": ("fit", "7680x4320"),
-    "自定义": ("custom", None),
-}
-
-# Video codecs: label -> nr_video.py --codec. NVENC = GPU, the rest run on the CPU.
-CODECS = {
-    "HEVC / H.265 · 显卡编码": "hevc_nvenc",
-    "H.264 · 显卡编码": "h264_nvenc",
-    "AV1 · 显卡编码": "av1_nvenc",
-    "AV1 · CPU 编码": "av1_svt",
-    "ProRes · CPU 编码": "prores",
-    "FFV1 无损 · CPU 编码": "ffv1",
-}
-CONTAINERS = {  # which containers each codec can go into (first = default)
-    "hevc_nvenc": ["mp4", "mkv", "mov"],
-    "h264_nvenc": ["mp4", "mkv", "mov"],
-    "av1_nvenc": ["mp4", "mkv", "webm"],
-    "av1_svt": ["mp4", "mkv", "webm"],
-    "prores": ["mov", "mkv"],
-    "ffv1": ["mkv"],
-}
-QUALITIES = {  # constant-quality targets (lower = better); "自定义" opens the CQ / bitrate fields
-    "极高画质（CQ 15）": 15,
-    "高画质（CQ 19）": 19,
-    "均衡（CQ 23）": 23,
-    "节省空间（CQ 28）": 28,
-    "自定义": None,
-}
-AUDIO = ["auto", "copy", "aac", "opus", "flac", "none"]
-PRORES_PROFILES = ["proxy", "lt", "standard", "hq", "4444", "4444xq"]
-
-
-def nr_model_args(style, preset, intensity, local_structure, local_tone, skin, global_tone,
-                  detail, color, ui_correction, auto_mask, hdr):
-    """The NR model + composite flags shared by both tabs (same names as the CLI)."""
-    a = ["--nr-style", str(STYLES[style]), "--nr-preset", str(PRESETS[preset]),
-         "--nr-intensity", str(intensity), "--nr-local-structure", str(local_structure),
-         "--nr-local-tone", str(local_tone), "--nr-skin", str(skin),
-         "--nr-global-tone", str(global_tone), "--nr-detail", str(detail),
-         "--nr-color", str(color), "--nr-ui-correction", "1" if ui_correction else "0"]
-    if auto_mask:
-        a += ["--nr-auto-mask"]
-    if hdr:
-        a += ["--nr-hdr"]
-    return a
-
-
-def fit_box(w, h, box):
-    """Largest even size with the same aspect as w x h that fits in the box (turned for portrait)."""
-    bw, bh = (int(x) for x in box.split("x"))
-    if (h > w) != (bh > bw):
-        bw, bh = bh, bw
-    f = min(bw / w, bh / h)
-    ow, oh = int(round(w * f)), int(round(h * f))
-    return max(2, ow - ow % 2), max(2, oh - oh % 2)
-
-
-def custom_size_args(width, height, scale):
-    """Custom: width / height win (one side = aspect kept, both = exact size); else the scale."""
-    a = []
-    if int(width or 0) > 0:
-        a += ["--nr-width", str(int(width))]
-    if int(height or 0) > 0:
-        a += ["--nr-height", str(int(height))]
-    if not a and float(scale or 1.0) != 1.0:
-        a += ["--nr-scale", str(float(scale))]
-    return a
-
-
-def size_args_image(image, size, width, height, scale):
-    """--nr-width/--nr-height/--nr-scale for the CLI, from the size preset (the CLI has no --nr-fit)."""
-    kind, val = SIZES[size]
-    if kind == "scale":
-        return ["--nr-scale", str(val)] if val != 1.0 else []
-    if kind == "fit":
-        from PIL import Image
-        with Image.open(image) as im:
-            w, h = im.size
-        ow, oh = fit_box(w, h, val)
-        return ["--nr-width", str(ow), "--nr-height", str(oh)]
-    return custom_size_args(width, height, scale)
-
-
-def size_args_video(size, width, height, scale):
-    kind, val = SIZES[size]
-    if kind == "scale":
-        return ["--nr-scale", str(val)] if val != 1.0 else []
-    if kind == "fit":
-        return ["--nr-fit", val]
-    return custom_size_args(width, height, scale)
-
+from render_engine import (ROOT, EXE, NRV, OUT_DIR, STYLES, PRESETS, SR_PRESETS, SIZES, CODECS,
+    CONTAINERS, QUALITIES, AUDIO, PRORES_PROFILES, nr_model_args, fit_box, custom_size_args,
+    size_args_image, size_args_video, BROWSER_PLAYABLE, make_preview, _stream)
 
 def run_image(image, size, width, height, scale, sr_preset, style, preset, intensity,
               local_structure, local_tone, skin, global_tone, detail, color, ui_correction,
@@ -171,43 +59,6 @@ def run_image(image, size, width, height, scale, sr_preset, style, preset, inten
 
 # What a browser <video> tag plays (gradio's own list). Anything else gets a small H.264 preview
 # copy so the result is visible in the UI; the real file is untouched and offered for download.
-BROWSER_PLAYABLE = {("mp4", "h264_nvenc"), ("mp4", "av1_nvenc"), ("mp4", "av1_svt"),
-                    ("webm", "av1_nvenc"), ("webm", "av1_svt")}
-
-
-def make_preview(out):
-    """A quick 8-bit H.264 copy (<=1080p) next to the result, for the browser only."""
-    ffmpeg = find_tool("ffmpeg")
-    if not ffmpeg:
-        return None
-    prev = os.path.splitext(out)[0] + "_preview.mp4"
-    common = [ffmpeg, "-y", "-v", "error", "-i", out, "-map", "0:v:0", "-map", "0:a:0?",
-              "-vf", "scale='min(1920,iw)':-2:flags=bicubic,format=yuv420p"]
-    tail = ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", prev]
-    for venc in (["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "24", "-b:v", "0"],
-                 ["-c:v", "libopenh264", "-b:v", "8M"]):
-        if subprocess.run(common + venc + tail, capture_output=True).returncode == 0:
-            return prev
-    return None
-
-
-def _stream(proc):
-    """Yield output lines, splitting on both \\r (progress bar) and \\n for live updates."""
-    buf = ""
-    while True:
-        ch = proc.stdout.read(1)
-        if not ch:
-            break
-        if ch in "\r\n":
-            if buf.strip():
-                yield buf
-            buf = ""
-        else:
-            buf += ch
-    if buf.strip():
-        yield buf
-
-
 def run_video(video, engine, motion, motion_vis, size, width, height, scale, sr_preset, style,
               preset, intensity, local_structure, local_tone, skin, global_tone, detail, color,
               ui_correction, auto_mask, hdr, codec_label, container, quality, cq, bitrate,

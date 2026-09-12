@@ -86,11 +86,23 @@ def find_tool(name):
 def probe(ffprobe, path):
     """Video geometry / rate / colour tags and the first audio codec, via ffprobe JSON."""
     out = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_streams",
-                          "-show_format", path], capture_output=True, text=True).stdout
+                          "-show_format", path], capture_output=True, text=True, check=True,
+                         timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     info = json.loads(out or "{}")
     v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
     if not v:
-        sys.exit(f"no video stream in {path}")
+        raise ValueError("文件中没有可读取的视频画面。")
+    # ffmpeg autorotates decoded frames. Raw RGBA has no geometry metadata, so the
+    # renderer, encoder, upload response and size presets must use that same geometry.
+    rotation = next((s["rotation"] for s in v.get("side_data_list", []) if "rotation" in s),
+                    v.get("tags", {}).get("rotate", 0))
+    rotation = float(rotation) % 360
+    quarter = round(rotation / 90) % 4
+    if abs((rotation - quarter * 90 + 180) % 360 - 180) > 1:
+        raise ValueError("视频包含非直角旋转，请先将方向转正后再上传。")
+    width, height = int(v["width"]), int(v["height"])
+    if quarter % 2:
+        width, height = height, width
     a = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None)
     rate = v.get("r_frame_rate") or v.get("avg_frame_rate") or "25/1"
     num, den = (rate.split("/") + ["1"])[:2]
@@ -104,7 +116,7 @@ def probe(ffprobe, path):
             frames = 0
     unk = lambda s: (s or "unknown") if s not in ("", None, "unspecified", "reserved") else "unknown"
     return {
-        "w": int(v["width"]), "h": int(v["height"]), "fps": fps, "rate": rate, "frames": frames,
+        "w": width, "h": height, "rotation": rotation, "fps": fps, "rate": rate, "frames": frames,
         "pix_fmt": v.get("pix_fmt", ""), "range": unk(v.get("color_range")),
         "matrix": unk(v.get("color_space")), "primaries": unk(v.get("color_primaries")),
         "trc": unk(v.get("color_transfer")),

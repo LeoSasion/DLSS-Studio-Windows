@@ -1,0 +1,56 @@
+/* Run only inside the application's explicit native smoke-test mode. */
+(async()=>{
+  const test=window.__videoTest={phase:'starting',error:null,diagnostics:{}};
+  const wait=async(fn,label,timeout=20000)=>{const end=performance.now()+timeout;while(!fn()){if(performance.now()>end)throw Error(label+'; status='+document.querySelector('#status-text').textContent+'; notice='+document.querySelector('#notice-text').textContent);await new Promise(r=>setTimeout(r,50))}};
+  const assert=(value,label)=>{if(!value)throw Error(label)};
+  const delay=ms=>new Promise(r=>setTimeout(r,ms));
+  const click=selector=>document.querySelector(selector).click();
+  const checkpoint=async phase=>{test.phase=phase;test.resume=false;await wait(()=>test.resume,'Screenshot acknowledgment')};
+  const seek=async time=>{const el=document.querySelector('#video-timeline');el.value=time;el.dispatchEvent(new Event('input',{bubbles:true}));await wait(()=>!videoPlayer.source.seeking&&Math.abs(videoPlayer.source.currentTime-time)<.01,'Source seek');await delay(100)};
+  const single=async()=>{click('#frame-test-button');assert(videoPlayer.source.paused&&videoPlayer.result.paused,'Frame test must pause synchronously');await wait(()=>!state.busy&&state.framePreview?.job.status==='done','Single-frame render',120000);await wait(()=>videoPlayer.canCompare(),'Frame images loaded')};
+  try{
+    click('[data-mode=video]');
+    const blob=await(await fetch('data:video/mp4;base64,'+window.__videoFixture)).blob(),transfer=new DataTransfer();
+    transfer.items.add(new File([blob],'video-compare.mp4',{type:'video/mp4'}));
+    const input=document.querySelector('#file-input');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+    await wait(()=>!state.uploading&&videoPlayer.canCapture()&&!document.querySelector('#frame-test-button').disabled,'Video upload');
+    const source=videoPlayer.source,result=videoPlayer.result,originalUrl=source.src,originalAsset=state.asset.id;
+    const size=document.querySelector('#size-preset');size.selectedIndex=0;size.dispatchEvent(new Event('change',{bubbles:true}));
+    await seek(1.25);click('#video-play');await wait(()=>!source.paused&&source.currentTime>1.3,'Source playing');
+    await single();const frameTime=source.currentTime;
+    assert(frameTime>1.25&&frameTime<2,'Captured current position instead of first frame');
+    assert(Math.abs(state.framePreview.time-frameTime)<.001,'Capture timestamp drift');
+    assert(state.asset.id===originalAsset&&source.src===originalUrl,'Single-frame replaced the video asset');
+    assert(state.view==='compare'&&!document.querySelector('#video-compare-slider').hidden,'Single-frame compare visible');
+    const pixels=media=>{const c=document.createElement('canvas');c.width=source.videoWidth;c.height=source.videoHeight;const ctx=c.getContext('2d');ctx.drawImage(media,0,0,c.width,c.height);return ctx.getImageData(0,0,c.width,c.height).data};
+    const expected=pixels(source),actual=pixels(document.querySelector('#video-frame-original'));
+    assert(expected.length===actual.length&&expected.every((value,index)=>value===actual[index]),'Captured PNG differs from paused source frame');
+    const frameResponse=await fetch(state.framePreview.job.download);assert(frameResponse.headers.get('content-type').includes('image/png'),'Single-frame result is not PNG');
+    test.diagnostics.frame={time:frameTime,matchingPixels:true,downloadType:frameResponse.headers.get('content-type')};
+    const divider=document.querySelector('#video-compare-slider');divider.value=35;divider.dispatchEvent(new Event('input'));
+    assert(document.querySelector('#video-frame-result').style.clipPath.includes('35%'),'Frame divider does not move');
+    await checkpoint('frame');
+    await seek(2);assert(!state.framePreview&&document.querySelector('[data-view=compare]').disabled,'Seeking did not clear the frame preview');
+    form.elements.frames.value=16;form.elements.codec.value='prores';form.elements.codec.dispatchEvent(new Event('change',{bubbles:true}));
+    click('#start-button');await wait(()=>!state.busy&&state.output?.status==='done','Full video render',180000);await wait(()=>videoPlayer.canCompare(),'Video preview load');
+    assert(state.asset.id===originalAsset&&source.src===originalUrl,'Full processing did not retain original media');
+    assert(Math.abs(source.duration-4)<.1&&Math.abs(result.duration-2)<.2,'Expected limited processed duration');
+    click('[data-view=compare]');await seek(.5);
+    await wait(()=>!result.seeking&&Math.abs(result.currentTime-source.currentTime)<.01,'Paused videos not synchronized');
+    click('#video-play');await wait(()=>!source.paused&&!result.paused,'Synchronized playback');await delay(500);
+    const drift=Math.abs(source.currentTime-result.currentTime);assert(drift<.1,'Playback synchronization drift '+drift);assert(result.muted,'Duplicate audio');
+    const position=source.currentTime;click('[data-view=original]');assert(Math.abs(source.currentTime-position)<.1&&!source.paused,'Original view reset playback');
+    click('[data-view=compare]');assert(Math.abs(source.currentTime-position)<.15,'Compare view reset playback');click('#video-play');
+    await wait(()=>source.paused&&result.paused,'Pause both videos');await seek(.75);
+    await wait(()=>!result.seeking&&Math.abs(source.currentTime-result.currentTime)<.01,'Paused seek alignment');
+    test.diagnostics.video={drift,sourceDuration:source.duration,resultDuration:result.duration,sourcePreserved:true,resultMuted:result.muted};
+    const wholeJob=state.output.id;await single();assert(state.output.id===wholeJob,'Frame test lost full video result');
+    assert(document.querySelector('#download-label').textContent==='下载此帧','Frame download label');
+    click('#video-play');await wait(()=>!state.framePreview&&!source.paused&&!result.paused,'Return to full comparison from frame');
+    assert(state.output.id===wholeJob&&document.querySelector('#download').getAttribute('href')===state.output.download,'Full video download was not restored');
+    videoPlayer.pause();await seek(1.9);click('#video-play');await wait(()=>source.paused,'Stop at shorter result end');assert(source.currentTime<2.15,'Source ran beyond comparison duration');
+    await seek(.75);divider.value=50;divider.dispatchEvent(new Event('input'));
+    click('#close-notice');await checkpoint('compare');
+    test.phase='done';
+  }catch(error){test.error=error.stack||String(error);test.phase='failed'}
+})();

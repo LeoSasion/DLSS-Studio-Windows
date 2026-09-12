@@ -6,6 +6,8 @@ __pycache__/
 app/out/
 app/uploads/
 app/ui_out/
+app/studio-state.json
+app/studio-state.json.tmp
 logs/
 *.log
 *.pid
@@ -28,6 +30,9 @@ RELEASE-NOTES.md
 
 # Embedded browser profile and packaged WebView2 installer.
 desktop-profile/
+desktop-smoke-profile/
+*.previous
+*.bak
 components/
 *.nupkg
 

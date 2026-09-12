@@ -16,7 +16,7 @@
 
 来源：[DaniilSokolyuk/video2dlssnr](https://github.com/DaniilSokolyuk/video2dlssnr)。本地依据提交 `55a4ceb588a419b9b56497aa0b563d0c9e2b6c77` 和 v1.3 发行包进行适配。
 
-`app/app.py`、`app/nr_video.py` 包含上游代码；`source/` 为上游检出目录。它们不作为本项目完整原创文件纳入上述 MIT 授权。检查时上游未声明 LICENSE，相关公开再分发许可仍待确认。
+`app/app.py`、`app/nr_video.py` 及从界面中拆出的 `app/render_engine.py` 包含上游代码；开发工作目录中的 `source/` 为上游检出目录。它们不作为本项目完整原创文件纳入上述 MIT 授权。检查时上游未声明 LICENSE，相关公开再分发许可仍待确认。
 
 `app/out/video2dlssnr.exe` 和 NVIDIA NGX / DLSS DLL 不属于本项目的 MIT 授权范围。原有版权与适用条款继续有效。
 
