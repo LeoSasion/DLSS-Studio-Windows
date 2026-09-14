@@ -121,6 +121,40 @@
     const mute=document.querySelector('#video-mute'),wasMuted=videoPlayer.source.muted;mute.click();
     assert(videoPlayer.source.muted!==wasMuted&&mute.querySelector('svg')&&mute.getAttribute('aria-label')===(wasMuted?'静音':'取消静音'),'Mute icon action or accessible name failed');mute.click();
     test.checks.push('bottom-only player controls','drag keeps controls visible','touch reveal and idle hiding','single-row transport','mute icon and accessible label');
+    click('#reset-settings');
+    assert(settings().codec===options.video_defaults.codec&&settings().container==='mp4'&&settings().bitrate_mode==='auto','Reset did not restore OS export defaults');
+    for(const [size,bitrate] of [['1080p (1920×1080)',6000],['1440p (2560×1440)',9000],['4K (3840×2160)',12000]]){
+      document.querySelector('#size-preset').value=size;document.querySelector('#size-preset').dispatchEvent(new Event('change',{bubbles:true}));
+      assert(settings().bitrate===bitrate&&document.querySelector('#quality').selectedOptions[0].textContent.includes(String(bitrate/1000)+' Mbps'),'Automatic bitrate does not follow output size');
+    }
+    form.elements.codec.value='h264_cpu';form.elements.codec.dispatchEvent(new Event('change',{bubbles:true}));
+    assert(settings().bit_depth===8&&document.querySelector('#bit-depth-field').hidden,'CPU H.264 exposes unsupported bit depth');
+    document.querySelector('#quality').value='custom';document.querySelector('#quality').dispatchEvent(new Event('change',{bubbles:true}));
+    form.elements.bitrate.value=7500;form.elements.bitrate.dispatchEvent(new Event('change',{bubbles:true}));
+    document.querySelector('#size-preset').value='1080p (1920×1080)';
+    assert(settings().bitrate===7500&&settings().bitrate_mode==='manual','Size switch overwrote custom bitrate');
+    const custom=settings();applySettings(custom);assert(settings().bitrate===7500&&settings().bitrate_mode==='manual','Custom bitrate did not restore');
+    applySettings({...custom,bitrate_mode:'auto'});assert(settings().bitrate===6000,'Auto bitrate did not restore');
+    test.checks.push('OS export defaults and reset','6/9/12 Mbps resolution defaults','CPU H.264 controls','custom and automatic bitrate restore');
+    const originalOutput=state.output;
+    test.previewGeometry=[];
+    for(const [shape,width,height] of [['landscape',3840,2160],['portrait',2160,3840]]){
+      const url=`/test-preview-4k-${shape}.mp4`;
+      videoPlayer.setResult(url);state.output={...originalOutput,preview:url};
+      // Reproduce the old 114% source zoom carried into an upscaled result.
+      view('original');previewZoom.set(1.14);view('result');
+      await wait(()=>videoPlayer.result.videoWidth===width&&videoPlayer.result.videoHeight===height,'4K '+shape+' metadata');
+      videoPlayer.fit();
+      const area=videoPlayer.picture.getBoundingClientRect(),media=videoPlayer.viewport.getBoundingClientRect();
+      assert(previewZoom.factor===null&&media.left>=area.left-1&&media.right<=area.right+1&&media.top>=area.top-1&&media.bottom<=area.bottom+1,'4K '+shape+' preview exceeds available window');
+      assert(Math.abs(media.width/media.height-width/height)<.002,'4K '+shape+' aspect ratio distorted');
+      assert(Math.min(Math.abs(media.width-area.width),Math.abs(media.height-area.height))<1,'4K '+shape+' does not fill available long edge');
+      test.previewGeometry.push({shape,source:[width,height],area:[area.width,area.height],preview:[media.width,media.height]});
+      click('#zoom-native');assert(Math.abs(videoPlayer.viewport.getBoundingClientRect().width-width)<1,'4K native zoom broken');
+      view('original');view('compare');assert(previewZoom.factor===null,'Compare retained native zoom');
+    }
+    state.output=originalOutput;videoPlayer.setResult(originalOutput.preview,originalOutput.clip_start||0,originalOutput.job_kind==='clip');view('result');click('#reset-settings');
+    test.checks.push('4K landscape and portrait fit','preview switch resets pixel zoom','4K native zoom preserved');
     test.done=true;
   }catch(error){test.error=error.stack||String(error)}finally{window.fetch=originalFetch}
 })();

@@ -18,7 +18,7 @@ from typing import Literal, get_args
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 import render_engine as engine
 import nr_video
@@ -84,17 +84,20 @@ def public_job(job):
     return result
 
 
-def check_nvenc():
+def check_nvenc(codec):
     try:
         return subprocess.run([engine.find_tool("ffmpeg"), "-v", "error", "-f", "lavfi", "-i",
-            "color=s=64x64:d=0.04", "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-"],
+            "color=s=128x128:d=0.04", "-frames:v", "1", "-c:v", codec, "-f", "null", "-"],
             capture_output=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
 
-NVENC_AVAILABLE = check_nvenc()
+ENCODER_AVAILABLE = {codec: check_nvenc(codec) for codec in engine.CONTAINERS if codec.endswith("_nvenc")}
+NVENC_AVAILABLE = ENCODER_AVAILABLE["h264_nvenc"]
+WINDOWS_BUILD = engine.windows_build()
+DEFAULT_CODEC = engine.default_video_codec(WINDOWS_BUILD, ENCODER_AVAILABLE)
 GPU = GpuRuntime(ROOT)
 
 
@@ -133,15 +136,24 @@ class Settings(BaseModel):
     motion: bool = True
     motion_vis: bool = False
     motion_engine: str = "auto"
-    codec: str = "hevc_nvenc"
+    codec: str = DEFAULT_CODEC
     container: str = "mp4"
     cq: int = Field(19, ge=0, le=51)
     bitrate: int = Field(0, ge=0, le=1000000)
-    bit_depth: int = 10
+    bitrate_mode: Literal["auto", "manual"] = "auto"
+    bit_depth: int = 8 if DEFAULT_CODEC.startswith("h264_") else 10
     enc_preset: str = "p5"
     audio: str = "auto"
     prores_profile: str = "hq"
     frames: int = Field(0, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_explicit_bitrate(cls, values):
+        # Earlier saved versions and API clients have no bitrate_mode field.
+        if isinstance(values, dict) and "bitrate" in values and "bitrate_mode" not in values:
+            values = {**values, "bitrate_mode": "manual"}
+        return values
 
 
 def validate_settings(s):
@@ -167,11 +179,12 @@ def build_command(s, item, folder, selection):
         return [engine.EXE, "--nr-run", "--in", item["path"], "--out", str(folder)] + sr + model_args(s) + \
             engine.size_args_image(item["path"], s.size, 0, 0, 1)
     out = folder / ("result." + s.container)
+    bitrate = engine.recommended_bitrate(s.size, item["width"], item["height"]) if s.bitrate_mode == "auto" else s.bitrate
     args = [os.sys.executable, engine.NRV, "--in", item["path"], "--out", str(out),
             "--nr-motion-engine", s.motion_engine, "--nr-motion", "1" if s.motion else "0",
             "--codec", s.codec, "--enc-preset", s.enc_preset, "--bit-depth", str(s.bit_depth),
             "--prores-profile", s.prores_profile, "--audio", s.audio, "--cq", str(s.cq),
-            "--bitrate", str(s.bitrate)] + sr + model_args(s) + engine.size_args_video(s.size, 0, 0, 1)
+            "--bitrate", str(bitrate)] + sr + model_args(s) + engine.size_args_video(s.size, 0, 0, 1)
     if s.motion_vis:
         args.append("--nr-motion-vis")
     if s.frames:
@@ -185,7 +198,10 @@ def build_command(s, item, folder, selection):
 def options():
     return {"sizes": list(get_args(OutputSize)), "hardware": GPU.public(),
             "codecs": engine.CODECS, "containers": engine.CONTAINERS,
-            "nvenc_available": NVENC_AVAILABLE, "version": 2}
+            "nvenc_available": NVENC_AVAILABLE, "encoder_available": ENCODER_AVAILABLE,
+            "video_defaults": {"codec": DEFAULT_CODEC, "container": "mp4", "bitrate_mode": "auto",
+                "windows_build": WINDOWS_BUILD,
+                "bitrates": {size: engine.recommended_bitrate(size) for size in get_args(OutputSize)}}, "version": 2}
 
 
 def remove_folder(path, parent):
@@ -368,6 +384,9 @@ def render(jid, s, item, selection):
 def start_job(s: Settings):
     validate_settings(s)
     with mutex:
+        item = assets.get(s.asset_id)
+        if item and item["kind"] == "video" and s.bitrate_mode == "auto":
+            s.bitrate = engine.recommended_bitrate(s.size, item["width"], item["height"])
         if s.request_id:
             previous = next((j for j in jobs.values() if j.get("request_id") == s.request_id), None)
             if previous:

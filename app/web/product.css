@@ -83,5 +83,6 @@ input::placeholder{color:var(--muted)}
 .video-mute svg{display:block;width:20px;height:20px}
 .video-mute .sound-off,.video-mute[aria-pressed=true] .sound-on{display:none}
 .video-mute[aria-pressed=true] .sound-off{display:block}
+#custom-quality:has(>label[hidden]){grid-template-columns:minmax(0,1fr)}
 @media(max-width:760px){.video-transport{gap:6px;padding:18px 6px 8px}.video-trim{padding:0 12px}.video-time{font-size:11px}.trim-handle{width:24px}}
 @media(prefers-reduced-motion:reduce){.video-transport{transition:none;transform:none}}

@@ -17,7 +17,7 @@ function resultDirty(){
     keys.push('motion','motion_vis','motion_engine','codec','container','audio');
     const codec=desired.codec;
     if(codec==='prores')keys.push('prores_profile');
-    else if(codec!=='ffv1'){keys.push('cq','bitrate');if(codec!=='h264_nvenc')keys.push('bit_depth');if(codec.endsWith('_nvenc'))keys.push('enc_preset')}
+    else if(codec!=='ffv1'){keys.push('cq','bitrate');if(!codec.startsWith('h264_'))keys.push('bit_depth');if(codec.endsWith('_nvenc'))keys.push('enc_preset')}
   }
   return keys.some(key=>desired[key]!==undefined&&desired[key]!==output.settings[key]);
 }
@@ -38,7 +38,7 @@ function refreshProduct(){
 }
 function settingsChanged(){
   if(state.busy)return;
-  refreshProduct();
+  paintBitrate();refreshProduct();
   if(resultDirty()&&!$('#notice').classList.contains('error'))$('#notice').hidden=true;
   saveSession();
 }

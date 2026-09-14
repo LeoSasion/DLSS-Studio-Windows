@@ -287,7 +287,8 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
     this.raf=requestAnimationFrame(()=>this.tick());
   }
   fit(){
-    const ratio=this.source.videoWidth/this.source.videoHeight;
+    const media=this.view==='result'?(this.frame?this.frameResult:this.result):this.source;
+    const ratio=(media.videoWidth||media.naturalWidth)/(media.videoHeight||media.naturalHeight)||this.source.videoWidth/this.source.videoHeight;
     if(!Number.isFinite(ratio)||ratio<=0)return;
     const width=Math.min(this.picture.clientWidth,this.picture.clientHeight*ratio);
     this.viewport.style.width=`${width}px`;this.viewport.style.height=`${width/ratio}px`;

@@ -5,7 +5,7 @@ const state = {mode:'image', asset:null, output:null, framePreview:null, selecti
 const sessions = {image:null,video:null};
 let options = {containers:{hevc_nvenc:['mp4','mkv','mov']}};
 let dragDepth=0, pollTimer=0, polling=false;
-const videoFields=new Set(["motion_engine","motion","motion_vis","codec","container","bit_depth","cq","bitrate","audio","enc_preset","prores_profile","frames"]);
+const videoFields=new Set(["motion_engine","motion","motion_vis","codec","container","bit_depth","cq","bitrate","bitrate_mode","audio","enc_preset","prores_profile","frames"]);
 const showNotice = (text,error=false) => {$('#notice-text').textContent=text;$('#notice').hidden=false;$('#notice').classList.toggle('error',error)};
 const videoPlayer = new StudioVideoPlayer({onChange:refreshControls,onFrameCleared(){
   state.framePreview=null;
@@ -46,7 +46,7 @@ function fitStage(){
 }
 new ResizeObserver(fitStage).observe($('#canvas'));
 function sizeKey(){return $('#size-preset').value}
-function view(value){if(value!=='original'&&!currentOutput()?.preview)return;state.view=value;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===value);b.setAttribute('aria-pressed',b.dataset.view===value)});const compare=value==='compare'&&state.mode==='image';$('#compare-line').hidden=!compare;$('#compare-slider').hidden=!compare;$('#result-label').hidden=!compare;$('#source-label').hidden=value==='result';$('#result-image').hidden=value==='original'||state.mode!=='image';$('#result-image').style.clipPath=value==='result'?'none':`inset(0 0 0 ${$('#compare-slider').value}%)`;if(state.mode==='video')videoPlayer.setView(value);fitStage();saveSession()}
+function view(value){if(value!=='original'&&!currentOutput()?.preview)return;state.view=value;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===value);b.setAttribute('aria-pressed',b.dataset.view===value)});const compare=value==='compare'&&state.mode==='image';$('#compare-line').hidden=!compare;$('#compare-slider').hidden=!compare;$('#result-label').hidden=!compare;$('#source-label').hidden=value==='result';$('#result-image').hidden=value==='original'||state.mode!=='image';$('#result-image').style.clipPath=value==='result'?'none':`inset(0 0 0 ${$('#compare-slider').value}%)`;if(state.mode==='video')videoPlayer.setView(value);fitStage();previewZoom.reset();saveSession()}
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>view(b.dataset.view)));
 $('#compare-slider').addEventListener('input',e=>{const value=e.target.value;$('#result-image').style.clipPath=`inset(0 0 0 ${value}%)`;$('#compare-line').style.left=`${value}%`});
 function refreshControls(){
@@ -81,7 +81,7 @@ function showAsset(){
   $('#empty-state h2').textContent=imageMode?'把图片拖到这里':'把视频拖到这里';
   $('#empty-state p').textContent=imageMode?'支持 PNG、JPG、WebP 等常见格式':'支持 MP4、MOV、MKV 等常见格式';
   $('#empty-upload').textContent=imageMode?'选择图片':'选择视频';
-  state.sourceWidth=item?.width||0;state.sourceHeight=item?.height||0;
+  state.sourceWidth=item?.width||0;state.sourceHeight=item?.height||0;paintBitrate();
   if(state.output?.preview&&imageMode)$('#result-image').src=state.output.preview;
   else $('#result-image').removeAttribute('src');
   view('original');refreshControls();fitStage();previewZoom.reset();
@@ -107,20 +107,35 @@ $('#intensity').addEventListener('input',e=>{$('#intensity-number').value=Math.r
 const advanced=[['local_structure','局部结构',0,2,1],['local_tone','局部色调',0,2,1],['skin','皮肤细节',0,2,1],['global_tone','全局色调',0,2,1],['detail','效果融合',0,2,1],['color','色彩融合',0,1,1]];
 for(const [name,label,min,max,val] of advanced){const div=document.createElement('div');div.className='advanced-range';div.innerHTML=`<label for="${name}">${label}<output>${Math.round(val*100)}%</output></label><input id="${name}" name="${name}" type="range" min="${min}" max="${max}" value="${val}" step="0.05">`;div.querySelector('input').addEventListener('input',e=>{div.querySelector('output').textContent=`${Math.round(Number(e.target.value)*100)}%`;paintRanges()});$('#advanced-sliders').append(div)}
 function populateSelect(el,entries,selected){el.replaceChildren();entries.forEach(([text,value])=>{const option=document.createElement('option');option.textContent=text;option.value=value;el.append(option)});if(selected&&entries.some(([,v])=>v===selected))el.value=selected}
+function recommendedBitrate(){
+  if(sizeKey()!=='原始尺寸（不放大）')return options.video_defaults?.bitrates[sizeKey()]||6000;
+  const longEdge=Math.max(state.sourceWidth,state.sourceHeight);
+  return longEdge<=1920?6000:longEdge<=2560?9000:12000;
+}
+function paintBitrate(){
+  $('#quality option[value=auto]').textContent=`推荐码率 · ${recommendedBitrate()/1000} Mbps`;
+}
 function updateCodec(){
-  const codec=$('#codec').value,nvenc=codec.endsWith('_nvenc'),quality=nvenc||codec==='av1_svt';
+  const codec=$('#codec').value,nvenc=codec.endsWith('_nvenc'),cpuH264=codec==='h264_cpu',quality=nvenc||codec==='av1_svt'||cpuH264;
+  for(const option of $('#quality').options)option.disabled=cpuH264&&!['auto','custom'].includes(option.value);
+  if($('#quality').selectedOptions[0]?.disabled)$('#quality').value='auto';
+  const cq=form.elements.cq; cq.closest('label').hidden=cpuH264;
+  form.elements.bitrate.min=cpuH264?'1':'0';
+  if(cpuH264&&!Number(form.elements.bitrate.value))form.elements.bitrate.value=recommendedBitrate();
   const allowed=options.containers[codec]||['mp4'];populateSelect($('#container'),allowed.map(v=>[v,v]),$('#container').value);
-  const flags={'prores-field':codec==='prores','bit-depth-field':quality&&codec!=='h264_nvenc','quality-field':quality,'enc-preset-field':nvenc,'custom-quality':quality&&$('#quality').value==='custom'};
+  const flags={'prores-field':codec==='prores','bit-depth-field':quality&&!codec.startsWith('h264_'),'quality-field':quality,'enc-preset-field':nvenc,'custom-quality':quality&&$('#quality').value==='custom'};
   for(const [id,visible] of Object.entries(flags)){
     const field=$('#'+id);field.hidden=!visible;
     field.querySelectorAll('input,select').forEach(el=>el.dataset.codecDisabled=String(!visible));
   }
-  $('#codec-note').textContent=codec==='prores'?'ProRes 使用固定 10 bit，画质与体积由 ProRes 规格决定。':codec==='ffv1'?'FFV1 保存无损 RGB，无需选择压缩画质和编码预设。':codec==='h264_nvenc'?'H.264 使用 8 bit；需要 10 bit 时请选择 HEVC 或 AV1。':codec==='av1_svt'?'CPU AV1 使用 CRF 控制画质；数值越低，质量越高。':'CQ 越低，质量越高；填写码率后以码率为准。';
+  if(cpuH264)cq.dataset.codecDisabled='true';
+  $('#codec-note').textContent=codec==='prores'?'ProRes 使用固定 10 bit，画质与体积由 ProRes 规格决定。':codec==='ffv1'?'FFV1 保存无损 RGB，无需选择压缩画质和编码预设。':codec.startsWith('h264_')?'H.264 使用 8 bit；推荐码率随分辨率自动调整，也可自定义。':'推荐码率随分辨率自动调整；选择恒定画质时，数值越低，质量越高。';
+  paintBitrate();
   refreshControls();
 }
 $('#codec').addEventListener('change',updateCodec);$('#quality').addEventListener('change',updateCodec);
-$('#reset-settings').addEventListener('click',()=>{form.reset();state.style='默认';$('#intensity-number').value=100;$$('[data-style]').forEach(b=>{b.classList.toggle('active',b.dataset.style==='默认');b.setAttribute('aria-pressed',b.dataset.style==='默认')});$$('details').forEach(d=>d.open=false);$('#custom-quality').hidden=true;$$('.advanced-range').forEach(div=>div.querySelector('output').textContent=`${Math.round(Number(div.querySelector('input').value)*100)}%`);updateCodec();paintRanges();settingsChanged()});
-function settings(){const result={asset_id:state.asset?.id,size:sizeKey(),style:state.style};for(const el of form.elements){if(!el.name||el.dataset.codecDisabled==='true'||(state.mode==='image'&&videoFields.has(el.name)))continue;result[el.name]=el.type==='checkbox'?el.checked:el.type==='number'||el.type==='range'?Number(el.value):el.value}result.size=sizeKey();if(result.bit_depth!==undefined)result.bit_depth=Number(result.bit_depth);if(result.codec==='h264_nvenc')result.bit_depth=8;if(state.mode==='video'&&$('#quality').dataset.codecDisabled!=='true'&&$('#quality').value!=='custom'){result.cq=Number($('#quality').value);result.bitrate=0}return result}
+$('#reset-settings').addEventListener('click',()=>{form.reset();state.style='默认';$('#intensity-number').value=100;$$('[data-style]').forEach(b=>{b.classList.toggle('active',b.dataset.style==='默认');b.setAttribute('aria-pressed',b.dataset.style==='默认')});$$('details').forEach(d=>d.open=false);$('#custom-quality').hidden=true;$$('.advanced-range').forEach(div=>div.querySelector('output').textContent=`${Math.round(Number(div.querySelector('input').value)*100)}%`);updateCodec();$('#container').value=options.video_defaults.container;paintRanges();settingsChanged()});
+function settings(){const result={asset_id:state.asset?.id,size:sizeKey(),style:state.style};for(const el of form.elements){if(!el.name||el.dataset.codecDisabled==='true'||(state.mode==='image'&&videoFields.has(el.name)))continue;result[el.name]=el.type==='checkbox'?el.checked:el.type==='number'||el.type==='range'?Number(el.value):el.value}result.size=sizeKey();if(result.bit_depth!==undefined)result.bit_depth=Number(result.bit_depth);if(result.codec?.startsWith('h264_'))result.bit_depth=8;if(state.mode==='video'&&$('#quality').dataset.codecDisabled!=='true'){const quality=$('#quality').value;result.bitrate_mode=quality==='auto'?'auto':'manual';if(quality==='auto'){result.cq=19;result.bitrate=recommendedBitrate()}else if(quality!=='custom'){result.cq=Number(quality);result.bitrate=0}}return result}
 function showProgress(job){
   const progress=$('#progress-bar');
   if(Number.isFinite(job.progress))progress.value=job.progress;else progress.removeAttribute('value');
@@ -218,10 +233,13 @@ $('#close-notice').addEventListener('click',()=>$('#notice').hidden=true);$('#st
 form.addEventListener('submit',e=>e.preventDefault());
 async function init(){
   try{
-    options=await apiRequest('/api/options');paintHardware(options.hardware);const codecLabels={hevc_nvenc:'HEVC · 日常播放 / GPU',h264_nvenc:'H.264 · 通用播放 / GPU',av1_nvenc:'AV1 · 较小文件 / GPU',av1_svt:'AV1 · 较小文件 / CPU',prores:'ProRes · 后期剪辑 / CPU',ffv1:'FFV1 · 无损归档 / CPU'};populateSelect($('#codec'),Object.entries(options.codecs).map(([label,value])=>[codecLabels[value]||label,value]));
-    if(!options.nvenc_available){
-      const select=$('#codec');for(const option of select.options){if(option.value.endsWith('_nvenc')){option.disabled=true;option.textContent+='（当前不可用）'}option.defaultSelected=option.value==='prores'}select.value='prores';
+    options=await apiRequest('/api/options');paintHardware(options.hardware);const codecLabels={hevc_nvenc:'HEVC · 日常播放 / GPU',h264_nvenc:'H.264 · 通用播放 / GPU',h264_cpu:'H.264 · 通用播放 / CPU',av1_nvenc:'AV1 · 较小文件 / GPU',av1_svt:'AV1 · 较小文件 / CPU',prores:'ProRes · 后期剪辑 / CPU',ffv1:'FFV1 · 无损归档 / CPU'};populateSelect($('#codec'),Object.entries(options.codecs).map(([label,value])=>[codecLabels[value]||label,value]));
+    const select=$('#codec'),defaults=options.video_defaults;
+    for(const option of select.options){
+      if(option.value.endsWith('_nvenc')&&!(options.encoder_available?.[option.value]??options.nvenc_available)){option.disabled=true;option.textContent+='（当前不可用）'}
+      option.defaultSelected=option.value===defaults.codec;
     }
+    select.value=defaults.codec;
     updateCodec();paintRanges();showAsset();await restoreSession();
   }catch(error){$('#gpu-status').textContent='服务离线';$('.engine-status').dataset.ready='false';showNotice('无法连接处理服务，正在重试…',true);setTimeout(init,5000)}
 }

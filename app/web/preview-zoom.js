@@ -44,12 +44,14 @@ window.StudioZoom = class StudioZoom {
   }
   reset(){this.factor=null;this.x=this.y=0;this.pan=false;this.fit()}
   set(factor){this.factor=Math.max(.05,Math.min(8,factor));this.x=this.y=0;this.fit()}
-  step(direction){const m=this.getMedia();if(m)this.set((this.factor??m.stage.clientWidth/m.width)*Math.pow(1.25,direction))}
+  step(direction){const m=this.getMedia();if(m)this.set((this.factor??parseFloat(getComputedStyle(m.stage).width)/m.width)*Math.pow(1.25,direction))}
   fit(){
     const m=this.getMedia();
     this.buttons.forEach(button=>button.disabled=!m);
     if(!m){this.label.textContent='适应';return}
-    const width=m.stage.clientWidth,height=m.stage.clientHeight;
+    // clientWidth/clientHeight round fractional fitted sizes, which magnifies the
+    // rounding error at native zoom on a tall 4K preview.
+    const style=getComputedStyle(m.stage),width=parseFloat(style.width)||m.stage.clientWidth,height=parseFloat(style.height)||m.stage.clientHeight;
     this.buttons[1].title=`按当前预览的 ${m.width} 像素宽度显示；视频预览可能小于导出尺寸。`;
     const scale=this.factor===null?1:this.factor*m.width/Math.max(1,width);
     this.x=Math.max(-Math.max(0,(width*scale-m.area.clientWidth)/2),Math.min(Math.max(0,(width*scale-m.area.clientWidth)/2),this.x));

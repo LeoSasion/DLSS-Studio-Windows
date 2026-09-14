@@ -1,5 +1,6 @@
 """Rendering settings and helpers shared by the Studio API and legacy UI. No UI imports."""
 import os
+import sys
 import subprocess
 from nr_video import find_tool
 
@@ -35,6 +36,7 @@ SIZES = {
 CODECS = {
     "HEVC / H.265 · 显卡编码": "hevc_nvenc",
     "H.264 · 显卡编码": "h264_nvenc",
+    "H.264 · CPU 编码": "h264_cpu",
     "AV1 · 显卡编码": "av1_nvenc",
     "AV1 · CPU 编码": "av1_svt",
     "ProRes · CPU 编码": "prores",
@@ -43,6 +45,7 @@ CODECS = {
 CONTAINERS = {  # which containers each codec can go into (first = default)
     "hevc_nvenc": ["mp4", "mkv", "mov"],
     "h264_nvenc": ["mp4", "mkv", "mov"],
+    "h264_cpu": ["mp4", "mkv", "mov"],
     "av1_nvenc": ["mp4", "mkv", "webm"],
     "av1_svt": ["mp4", "mkv", "webm"],
     "prores": ["mov", "mkv"],
@@ -57,6 +60,22 @@ QUALITIES = {  # constant-quality targets (lower = better); "自定义" opens th
 }
 AUDIO = ["auto", "copy", "aac", "opus", "flac", "none"]
 PRORES_PROFILES = ["proxy", "lt", "standard", "hq", "4444", "4444xq"]
+
+
+def windows_build():
+    return sys.getwindowsversion().build if sys.platform == "win32" else 0
+
+
+def default_video_codec(build, available):
+    """Keep the OS's default format when hardware encoding is unavailable."""
+    hardware, software = ("av1_nvenc", "av1_svt") if build >= 22000 else ("h264_nvenc", "h264_cpu")
+    return hardware if available.get(hardware, False) else software
+
+
+def recommended_bitrate(size, width=1920, height=1080):
+    kind, value = SIZES[size]
+    long_edge = max(map(int, value.split("x"))) if kind == "fit" else max(width, height)
+    return 6000 if long_edge <= 1920 else 9000 if long_edge <= 2560 else 12000
 
 
 def nr_model_args(style, preset, intensity, local_structure, local_tone, skin, global_tone,
@@ -119,7 +138,7 @@ def size_args_video(size, width, height, scale):
     return custom_size_args(width, height, scale)
 
 
-BROWSER_PLAYABLE = {("mp4", "h264_nvenc"), ("mp4", "av1_nvenc"), ("mp4", "av1_svt"),
+BROWSER_PLAYABLE = {("mp4", "h264_nvenc"), ("mp4", "h264_cpu"), ("mp4", "av1_nvenc"), ("mp4", "av1_svt"),
                     ("webm", "av1_nvenc"), ("webm", "av1_svt")}
 
 

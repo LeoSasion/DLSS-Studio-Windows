@@ -35,6 +35,7 @@ import time
 CODECS = {
     "hevc_nvenc": ("hevc_nvenc", "nvenc"),
     "h264_nvenc": ("h264_nvenc", "nvenc"),
+    "h264_cpu": ("libopenh264", "openh264"),
     "av1_nvenc": ("av1_nvenc", "nvenc"),
     "av1_svt": ("libsvtav1", "sw"),
     "prores": ("prores_ks", "prores"),
@@ -45,11 +46,12 @@ CODEC_ALIASES = {
     "h264": "h264_nvenc", "h.264": "h264_nvenc", "avc": "h264_nvenc", "x264": "h264_nvenc",
     "av1": "av1_nvenc", "libsvtav1": "av1_svt", "svtav1": "av1_svt", "svt-av1": "av1_svt",
     "prores_ks": "prores", "lossless": "ffv1",
+    "libopenh264": "h264_cpu", "openh264": "h264_cpu",
 }
 # Which codecs each container can legally hold (what mainstream players will actually open).
 CONTAINERS = {
-    ".mp4": {"hevc_nvenc", "h264_nvenc", "av1_nvenc", "av1_svt"},
-    ".mov": {"hevc_nvenc", "h264_nvenc", "prores"},
+    ".mp4": {"hevc_nvenc", "h264_nvenc", "h264_cpu", "av1_nvenc", "av1_svt"},
+    ".mov": {"hevc_nvenc", "h264_nvenc", "h264_cpu", "prores"},
     ".mkv": set(CODECS),
     ".webm": {"av1_nvenc", "av1_svt"},
 }
@@ -236,6 +238,11 @@ def video_args(codec, args, outW, outH, tags):
         elif enc == "h264_nvenc":
             v += ["-profile:v", "high"]
         return v + colour, pix
+    if family == "openh264":
+        # The bundled LGPL FFmpeg provides OpenH264; it has no CQ/CRF control.
+        bitrate = args.bitrate or (6000 if max(outW, outH) <= 1920 else 9000 if max(outW, outH) <= 2560 else 12000)
+        return ["-c:v", enc, "-profile:v", "high", "-rc_mode", "bitrate", "-b:v", f"{bitrate}k",
+                "-maxrate", f"{2 * bitrate}k", "-allow_skip_frames", "0"] + colour, "yuv420p"
     if family == "sw":  # libsvtav1
         pix = "yuv420p10le" if ten else "yuv420p"
         v = ["-c:v", enc, "-preset", str(args.sw_preset), "-svtav1-params", "tune=0"]

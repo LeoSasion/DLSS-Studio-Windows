@@ -6,7 +6,7 @@ function saveSession(){
   sessions[state.mode]={asset:state.asset,output:state.output,framePreview:state.framePreview,selection:state.selection};
   try{localStorage.setItem(sessionKey,JSON.stringify({mode:state.mode,sessions,job:state.job,busy:state.busy,
     jobKind:state.jobKind,jobContext:state.jobContext,pendingPayload:state.pendingPayload,
-    view:state.view,time:videoPlayer.source.currentTime,settings:state.asset?settings():null}))}catch{}
+    view:state.view,time:videoPlayer.source.currentTime,exportDefaultsVersion:1,settings:state.asset?settings():null}))}catch{}
 }
 window.addEventListener('pagehide',saveSession);
 document.querySelector('.brand').addEventListener('click',event=>event.preventDefault());
@@ -25,7 +25,9 @@ function applySettings(values){
   state.style=values.style||'默认';
   $$('[data-style]').forEach(button=>{const active=button.dataset.style===state.style;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
   $('#intensity-number').value=Math.round(Number($('#intensity').value)*100);
-  const cq=String(values.cq??19);$('#quality').value=values.bitrate||!['15','19','23','28'].includes(cq)?'custom':cq;
+  if(values.codec||'cq' in values||'bitrate_mode' in values){
+    const cq=String(values.cq??19);$('#quality').value=values.bitrate_mode==='auto'?'auto':values.bitrate||!['15','19','23','28'].includes(cq)?'custom':cq;
+  }
   $$('.advanced-range').forEach(row=>row.querySelector('output').textContent=`${Math.round(Number(row.querySelector('input').value)*100)}%`);
   updateCodec();paintRanges();refreshProduct();
 }
@@ -80,7 +82,12 @@ async function restoreSession(){
       const record=sessions[state.mode];state.asset=record?.asset||null;state.output=record?.output||null;state.selection=record?.selection||null;
       $$('[data-mode]').forEach(button=>{const active=button.dataset.mode===state.mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
       $('#video-settings').hidden=state.mode!=='video';$('#file-input').accept=state.mode==='image'?'image/png,image/jpeg,image/webp,image/bmp,image/tiff':'.mp4,.mov,.mkv,.webm,.avi,.m4v';
-      applySettings(saved.settings);showAsset();
+      // Migrate the old automatic ProRes fallback once; saved presets and versions stay intact.
+      let restored=saved.settings;
+      if(!saved.exportDefaultsVersion&&!saved.busy&&!saved.pendingPayload&&restored?.codec==='prores'&&(!restored.prores_profile||restored.prores_profile==='hq')&&!restored.bitrate){
+        restored={...restored,codec:options.video_defaults.codec,container:'mp4',bitrate_mode:'auto'};
+      }
+      applySettings(restored);showAsset();
     }
     const recent=await apiRequest('/api/jobs?limit=1');
     if(recent.active.length){await restoreJob(recent.active[0]);return}
