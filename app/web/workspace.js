@@ -87,7 +87,7 @@
     if (!inspector.getClientRects().length) return;
     const bottom = inspector.getBoundingClientRect().bottom - parseFloat(getComputedStyle(inspector).paddingBottom) - 4;
     for (const details of sections) {
-      if (!details.getClientRects().length) continue;
+      if (!details.getClientRects().length || details.hasAttribute('data-collapsed')) continue;
       details.classList.add('inline-settings'); details.open = true;
       if (form.getBoundingClientRect().bottom > bottom) {
         details.classList.remove('inline-settings'); details.open = false;

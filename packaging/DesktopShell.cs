@@ -39,9 +39,77 @@ internal sealed class CaptionButton : Button {
     }
 }
 
+// Separate native surfaces prevent DWM accent blur from spilling across panel gaps.
+internal sealed class DesktopBlurPanel : Form {
+    public bool BlurApplied;
+    public DesktopBlurPanel(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;StartPosition=FormStartPosition.Manual;BackColor=Color.Black;AutoScaleMode=AutoScaleMode.None;}
+    protected override bool ShowWithoutActivation{get{return true;}}
+    protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ClassStyle&=~0x20000;p.ExStyle|=0x08000000|0x80|0x20;return p;}}
+    protected override void OnHandleCreated(EventArgs e){
+        base.OnHandleCreated(e);
+        int corner=1;DwmSetWindowAttribute(Handle,33,ref corner,4);
+        int policy=1;DwmSetWindowAttribute(Handle,2,ref policy,4);
+        RefreshBlur();
+    }
+    public void RefreshBlur(){
+        var accent=new AccentPolicy{State=3};var memory=Marshal.AllocHGlobal(Marshal.SizeOf(accent));
+        try{Marshal.StructureToPtr(accent,memory,false);var data=new CompositionData{Attribute=19,Data=memory,Size=new IntPtr(Marshal.SizeOf(accent))};BlurApplied=SetWindowCompositionAttribute(Handle,ref data);}
+        catch(EntryPointNotFoundException){BlurApplied=false;}
+        finally{Marshal.FreeHGlobal(memory);}
+    }
+    protected override void OnSizeChanged(EventArgs e){
+        base.OnSizeChanged(e);
+        var previous=Region;Region=new Region(new Rectangle(0,0,Width,Height));if(previous!=null)previous.Dispose();
+    }
+    // Leave the surface to DWM. A normal WinForms background paint would cover
+    // the accent with opaque black after its first frame.
+    protected override void OnPaintBackground(PaintEventArgs e){}
+    public void Place(IntPtr after,Rectangle r){
+        SetWindowPos(Handle,after,r.X,r.Y,r.Width,r.Height,0x10|0x40);
+        RefreshBlur();
+    }
+    protected override void WndProc(ref Message m){if(m.Msg==0x84){m.Result=new IntPtr(-1);return;}base.WndProc(ref m);}
+    [StructLayout(LayoutKind.Sequential)] struct AccentPolicy{public int State,Flags,Color,Animation;}
+    [StructLayout(LayoutKind.Sequential)] struct CompositionData{public int Attribute;public IntPtr Data,Size;}
+    [DllImport("user32.dll")] [return:MarshalAs(UnmanagedType.Bool)] static extern bool SetWindowCompositionAttribute(IntPtr window,ref CompositionData data);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int w,int h,uint flags);
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window,int attribute,ref int value,int size);
+}
+internal sealed class DesktopBlurLayer : IDisposable {
+    readonly System.Collections.Generic.List<DesktopBlurPanel> panels=new System.Collections.Generic.List<DesktopBlurPanel>();
+    int[][] regions=new int[0][];Point offset;
+    public bool IsDisposed{get;private set;}
+    public bool Disposing{get{return IsDisposed;}}
+    public bool Visible{get;private set;}
+    public Rectangle Bounds{get;private set;}
+    public IntPtr Handle{get{return panels.Count==0?IntPtr.Zero:panels[panels.Count-1].Handle;}}
+    public bool BlurApplied{get{return panels.Count>0 && panels.TrueForAll(p=>p.BlurApplied);}}
+    public void SetPanels(int[][] value,Point origin){regions=value;offset=origin;}
+    public void Show(){if(!IsDisposed)Visible=true;}
+    public void Hide(){Visible=false;if(!IsDisposed)foreach(var panel in panels)panel.Hide();}
+    public void PlaceBehind(Form host){
+        if(IsDisposed || !Visible)return;
+        Bounds=host.RectangleToScreen(host.ClientRectangle);
+        while(panels.Count<regions.Length)panels.Add(new DesktopBlurPanel());
+        while(panels.Count>regions.Length){var last=panels[panels.Count-1];panels.RemoveAt(panels.Count-1);last.Dispose();}
+        IntPtr after=host.Handle;
+        for(int i=0;i<regions.Length;i++){
+            var r=regions[i];var panel=panels[i];
+            if(r.Length<5 || r[2]<4 || r[3]<4){panel.Hide();continue;}
+            var bounds=new Rectangle(Bounds.X+r[0]+offset.X+2,Bounds.Y+r[1]+offset.Y+2,r[2]-4,r[3]-4);
+            if(!panel.Visible){panel.Bounds=bounds;panel.Show();}
+            panel.Place(after,bounds);after=panel.Handle;
+        }
+    }
+    public void Dispose(){if(IsDisposed)return;IsDisposed=true;Visible=false;foreach(var panel in panels)panel.Dispose();panels.Clear();}
+}
+
 internal sealed class DesktopShell : Form {
     readonly StudioService service = new StudioService();
     readonly WebView2 web = new WebView2();
+    readonly DesktopBlurLayer blurLayer = new DesktopBlurLayer();
+    int[][] panelRegions = new int[0][];
+    bool lightTheme;
     readonly CancellationTokenSource startup = new CancellationTokenSource();
     readonly TableLayoutPanel loading = new TableLayoutPanel();
     readonly Label message = new Label();
@@ -49,7 +117,7 @@ internal sealed class DesktopShell : Form {
     readonly CaptionButton loadingMaximize = new CaptionButton("maximize");
     readonly bool smoke;
     readonly uint activateMessage;
-    bool starting = true, allowClose, smokeStarted, smokeDownloadComplete, documentLoaded, transparentHost, glassMode, nativeBlurApplied, maximizedState, lightTheme;
+    bool starting = true, allowClose, smokeStarted, smokeDownloadComplete, documentLoaded, transparentHost, glassMode, maximizedState;
     public int TestResult = 1;
     public DesktopShell(bool test, uint messageId) {
         smoke=test;activateMessage=messageId;
@@ -84,7 +152,7 @@ internal sealed class DesktopShell : Form {
             await Initialize();
         };
         FormClosing+=OnClosing;
-        FormClosed+=(s,e)=>{captionTips.Dispose();web.Dispose();service.Dispose();startup.Dispose();};
+        FormClosed+=(s,e)=>{documentLoaded=false;blurLayer.Dispose();captionTips.Dispose();web.Dispose();service.Dispose();startup.Dispose();};
         if(smoke)ShowInTaskbar=false;
     }
     async Task Initialize() {
@@ -140,14 +208,15 @@ internal sealed class DesktopShell : Form {
                 else if(action=="drag")DragWindow();
                 else if(action=="maximize")ToggleMaximize();
                 else if(action=="window-state")NotifyWindowState();
+                else if(action.StartsWith("blur-regions:")){
+                    try{panelRegions=new JavaScriptSerializer().Deserialize<int[][]>(action.Substring(13));blurLayer.SetPanels(panelRegions,web.Location);UpdateBlurLayer();}catch(ArgumentException){}
+                }
+                else if(action=="theme:light" || action=="theme:dark"){
+                    lightTheme=action=="theme:light";if(documentLoaded&&maximizedState)ApplyGlassMode();
+                }
                 else if(action=="glass:on" || action=="glass:off"){
                     bool enabled=action=="glass:on";
                     if(glassMode!=enabled){glassMode=enabled;if(documentLoaded)ApplyGlassMode();}
-                }
-                else if(action=="theme:light" || action=="theme:dark"){
-                    lightTheme=action=="theme:light";
-                    if(!transparentHost)BackColor=WindowBackground;
-                    if(maximizedState)web.DefaultBackgroundColor=WindowBackground;
                 }
             };
             core.NavigationCompleted+=async(s,e)=>{
@@ -180,7 +249,6 @@ internal sealed class DesktopShell : Form {
         }finally{DeleteObject(region);}
         if(transparentHost){BackColor=Color.Black;Invalidate();}
     }
-    Color WindowBackground{get{return lightTheme?Color.FromArgb(233,235,238):Color.FromArgb(1,2,3);}}
     void UpdateWindowState(){
         // Minimizing preserves whether the window will return maximized.
         if(WindowState==FormWindowState.Minimized)return;
@@ -195,27 +263,18 @@ internal sealed class DesktopShell : Form {
         if(!IsDisposed && web.CoreWebView2!=null)web.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(new {type="window-state",maximized=maximizedState}));
     }
     void ApplyGlassMode(){
-        SetNativeBlur(false);nativeBlurApplied=false;
         if(maximizedState){
-            var blur=new DwmBlurBehind{Flags=1,Enable=false};
-            DwmEnableBlurBehindWindow(Handle,ref blur);transparentHost=false;
-            web.DefaultBackgroundColor=WindowBackground;BackColor=WindowBackground;
-        }else{
-            web.DefaultBackgroundColor=Color.Transparent;
-            EnableDesktopTransparency();
-            nativeBlurApplied=glassMode && SetNativeBlur(true);
-        }
+            blurLayer.Hide();
+            var blur=new DwmBlurBehind{Flags=1,Enable=false};DwmEnableBlurBehindWindow(Handle,ref blur);transparentHost=false;
+            web.DefaultBackgroundColor=lightTheme?Color.White:Color.Black;BackColor=web.DefaultBackgroundColor;
+        }else{web.DefaultBackgroundColor=Color.Transparent;EnableDesktopTransparency();}
+        UpdateBlurLayer();
     }
-    bool SetNativeBlur(bool enabled){
-        // CSS backdrop filters cannot sample the desktop behind a WebView window.
-        var accent=new AccentPolicy{State=enabled?3:0};
-        var memory=Marshal.AllocHGlobal(Marshal.SizeOf(accent));
-        try{
-            Marshal.StructureToPtr(accent,memory,false);
-            var data=new CompositionAttributeData{Attribute=19,Data=memory,Size=new IntPtr(Marshal.SizeOf(accent))};
-            return SetWindowCompositionAttribute(Handle,ref data);
-        }catch(EntryPointNotFoundException){return false;}
-        finally{Marshal.FreeHGlobal(memory);}
+    void UpdateBlurLayer(){
+        if(IsDisposed || Disposing || blurLayer.IsDisposed || blurLayer.Disposing)return;
+        if(!documentLoaded || !glassMode || maximizedState || WindowState==FormWindowState.Minimized || !Visible || panelRegions.Length==0){blurLayer.Hide();return;}
+        if(!blurLayer.Visible)blurLayer.Show();
+        blurLayer.PlaceBehind(this);
     }
     protected override CreateParams CreateParams{
         get{var style=base.CreateParams;style.ExStyle&=~0x20;return style;}
@@ -230,6 +289,7 @@ internal sealed class DesktopShell : Form {
     protected override void WndProc(ref Message m){
         if((uint)m.Msg==activateMessage){if(WindowState==FormWindowState.Minimized)WindowState=maximizedState?FormWindowState.Maximized:FormWindowState.Normal;Show();Activate();SetForegroundWindow(Handle);return;}
         base.WndProc(ref m);
+        if((m.Msg==0x47 || m.Msg==0x06) && documentLoaded)UpdateBlurLayer();
         if(m.Msg==0x31E && documentLoaded)ApplyGlassMode();
         if(m.Msg==0x84){
             var p=PointToClient(new Point(unchecked((short)m.LParam.ToInt64()),unchecked((short)(m.LParam.ToInt64()>>16))));
@@ -268,9 +328,9 @@ internal sealed class DesktopShell : Form {
             await core.ExecuteScriptAsync("document.querySelector('[data-theme=dark][type=button]').click()");
             if(!await Check("document.documentElement.dataset.theme==='dark'",5))throw new Exception("Dark theme failed");
             using(var file=File.Create(Path.Combine(service.Root,"desktop-dark.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,file);
-            await VerifyDesktopTransparency();
+            TopMost=true;await VerifyDesktopTransparency();
             await VerifyGlassMode();
-            await VerifyMaximizedMode();
+            await VerifyMaximizedMode();TopMost=false;
             if(!await Check("document.documentElement.scrollWidth<=innerWidth",2))throw new Exception("Horizontal overflow");
             // Exercise the actual upload input and processing button inside the embedded browser.
             await core.ExecuteScriptAsync("(async()=>{const b=await(await fetch('/assets/sample-lake.png')).blob();const d=new DataTransfer();d.items.add(new File([b],'desktop-test.png',{type:'image/png'}));const i=document.querySelector('#file-input');i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}));})()");
@@ -290,7 +350,7 @@ internal sealed class DesktopShell : Form {
             if(WindowState!=FormWindowState.Minimized)throw new Exception("Minimize command failed");
             WindowState=FormWindowState.Normal;
             if(OwnOrigin("https://example.com/")||OwnOrigin("file:///C:/"))throw new Exception("Origin validation failed");
-            File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),"PASS: maximize/restore with opaque background and preserved glass choice; native frosted glass and input hit testing; transparent desktop composition; borderless WebView2; compact image/video layout without overflow; settings dialogs and form fields; dark/light themes; real upload and render; compare; download; minimize; close requested; service_port="+service.Port);
+            File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),"PASS: panel-clipped native background blur, clear normal-window gaps and unchanged borders; maximized black/white opaque canvas with glass disabled and restored preference; input hit testing; transparent desktop composition; borderless WebView2; compact image/video layout without overflow; settings dialogs and form fields; dark/light themes; real upload and render; compare; download; minimize; close requested; service_port="+service.Port);
             TestResult=0;
             await core.ExecuteScriptAsync("setTimeout(()=>document.querySelector('.window-close').click(),100)");
         } catch(Exception ex){File.WriteAllText(Path.Combine(service.Root,"desktop-smoke-result.txt"),ex.ToString());allowClose=true;Close();}
@@ -309,7 +369,7 @@ internal sealed class DesktopShell : Form {
             using(var file=File.Create(Path.Combine(service.Root,"desktop-video-"+phase+".png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,file);
             if(phase=="compare"){
                 var previous=Size;Size=MinimumSize;await Task.Delay(250);
-                if(!await Check("document.documentElement.scrollWidth<=innerWidth && document.querySelector('#video-stage').scrollWidth<=document.querySelector('#video-stage').clientWidth && document.querySelector('#frame-test-button').getBoundingClientRect().right<=document.querySelector('#canvas').getBoundingClientRect().right",3))throw new Exception("Compact video transport overflow");
+                if(!await Check("document.documentElement.scrollWidth<=innerWidth && document.querySelector('#video-stage').scrollWidth<=document.querySelector('#video-stage').clientWidth && ['#trim-start','#trim-end'].every(s=>{const r=document.querySelector(s).getBoundingClientRect(),c=document.querySelector('#canvas').getBoundingClientRect();return r.left>=c.left&&r.right<=c.right}) && !document.querySelector('#frame-test-button')",3))throw new Exception("Compact video transport overflow");
                 using(var file=File.Create(Path.Combine(service.Root,"desktop-video-compact.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,file);
                 Size=previous;
             }
@@ -345,8 +405,8 @@ internal sealed class DesktopShell : Form {
     }
     async Task VerifyDesktopTransparency(){
         // A solid test window behind the app proves actual desktop composition, not just CSS alpha.
-        using(var backdrop=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=Bounds,BackColor=Color.FromArgb(52,84,110)}){
-            backdrop.Show();BringToFront();Activate();await Task.Delay(350);
+        using(var backdrop=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,TopMost=true,StartPosition=FormStartPosition.Manual,Bounds=Bounds,BackColor=Color.FromArgb(52,84,110)}){
+            backdrop.Show();BringToFront();Activate();SetWindowPos(backdrop.Handle,blurLayer.Visible?blurLayer.Handle:Handle,0,0,0,0,0x13);await Task.Delay(350);
             using(var snapshot=new Bitmap(Width,Height)){
                 using(var graphics=Graphics.FromImage(snapshot))graphics.CopyFromScreen(Location,Point.Empty,Size);
                 snapshot.Save(Path.Combine(service.Root,"desktop-transparent-native.png"),System.Drawing.Imaging.ImageFormat.Png);
@@ -361,11 +421,6 @@ internal sealed class DesktopShell : Form {
         snapshot.Save(Path.Combine(service.Root,filename),System.Drawing.Imaging.ImageFormat.Png);
         return snapshot;
     }
-    static double StripeVariation(Bitmap bitmap){
-        double total=0,squared=0;int count=0;
-        for(int x=120;x<440;x++){var p=bitmap.GetPixel(x,210);double value=(p.R+p.G+p.B)/3.0;total+=value;squared+=value*value;count++;}
-        return Math.Sqrt(squared/count-Math.Pow(total/count,2));
-    }
     void VerifyInputOwnership(){
         foreach(var point in new[]{new Point(1,Height/2),new Point(8,8),new Point(100,210),new Point(Width-60,40)}){
             var screen=PointToScreen(point);var target=WindowFromPoint(screen);
@@ -374,69 +429,129 @@ internal sealed class DesktopShell : Form {
             if(SendMessage(target,0x84,IntPtr.Zero,packed).ToInt64()==-1)throw new Exception("Transparent region returns HTTRANSPARENT: "+point);
         }
     }
-    async Task VerifyGlassMode(){
+    readonly System.Collections.Generic.Dictionary<string,Color[]> borderSamples = new System.Collections.Generic.Dictionary<string,Color[]>();
+    async Task VerifyPanelComposition(string name,bool translucent){
         var core=web.CoreWebView2;
-        using(var backdrop=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=Bounds,BackColor=Color.FromArgb(57,91,119)}){
+        if(!transparentHost || web.DefaultBackgroundColor.A!=0 || !await Check("getComputedStyle(document.documentElement).backgroundColor==='rgba(0, 0, 0, 0)' && getComputedStyle(document.body).backgroundColor==='rgba(0, 0, 0, 0)' && !document.querySelector('#glass-toggle').disabled",3))throw new Exception("Opaque desktop host: "+name);
+        var json=await core.ExecuteScriptAsync("(()=>{const r=s=>document.querySelector(s).getBoundingClientRect(),c=r('.canvas-panel'),i=r('.inspector'),h=r('.topbar'),o=r('.output-bar');return [[(c.right+i.left)/2,c.top+c.height/2],[c.left+50,(h.bottom+c.top)/2],[c.left+50,(c.bottom+o.top)/2],[c.left+30,c.bottom-30]].map(([x,y])=>[Math.round(x*devicePixelRatio),Math.round(y*devicePixelRatio)])})()");
+        var coords=new JavaScriptSerializer().Deserialize<int[][]>(json);
+        var points=Array.ConvertAll(coords,p=>new Point(p[0]+web.Left,p[1]+web.Top));
+        var borderJson=await core.ExecuteScriptAsync("[...document.querySelectorAll('.glass')].map(e=>{const r=e.getBoundingClientRect();return [Math.round((r.left+r.width*.4)*devicePixelRatio),Math.round((r.top+(document.documentElement.dataset.theme==='dark'?1:0))*devicePixelRatio)]})");
+        var borderPoints=new JavaScriptSerializer().Deserialize<int[][]>(borderJson);
+        using(var backdrop=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,TopMost=true,StartPosition=FormStartPosition.Manual,Bounds=Bounds}){
+            bool inverted=false,solid=false;
             backdrop.Paint+=(s,e)=>{
-                using(var blue=new SolidBrush(Color.FromArgb(86,151,183)))e.Graphics.FillEllipse(blue,-120,280,980,820);
-                using(var mauve=new SolidBrush(Color.FromArgb(171,119,142)))e.Graphics.FillEllipse(mauve,640,-200,1000,1050);
-                for(int x=80;x<480;x+=16)e.Graphics.FillRectangle((x/16)%2==0?Brushes.White:Brushes.Black,x,170,16,100);
+                if(solid)e.Graphics.Clear(inverted?Color.Black:Color.White);
+                else for(int x=0;x<backdrop.Width;x+=8)e.Graphics.FillRectangle(((x/8)%2==0)^inverted?Brushes.White:Brushes.Black,x,0,8,backdrop.Height);
             };
-            backdrop.Show();BringToFront();Activate();await Task.Delay(250);
-            VerifyInputOwnership();
-            await core.ExecuteScriptAsync("document.querySelector('#glass-toggle').click();document.activeElement.blur()");
-            if(!await Check("document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.canvas-panel')).backdropFilter.includes('blur') && getComputedStyle(document.querySelector('.canvas-panel')).opacity==='1'",3) || !nativeBlurApplied)throw new Exception("Glass activation failed");
-            core.Reload();
-            if(!await Check("document.querySelector('#glass-toggle')?.getAttribute('aria-pressed')==='true' && document.querySelector('.desktop-window-controls') && localStorage.getItem('dlss-glass')==='on'",5))throw new Exception("Glass state did not persist");
-            if(!await Check("[...document.querySelectorAll('.glass,button,button>.icon,.download')].every(e=>getComputedStyle(e).opacity==='1')",3))throw new Exception("Glass faded controls or text");
-            await core.ExecuteScriptAsync("document.querySelector('.advanced summary').click()");
-            if(!await Check("document.querySelector('#settings-dialog').open && getComputedStyle(document.querySelector('#settings-dialog')).backdropFilter.includes('blur')",3))throw new Exception("Settings dialog is not frosted");
-            await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click();document.activeElement.blur()");
-            SetNativeBlur(false);EnableDesktopTransparency();await Task.Delay(350);
-            double clearVariation,blurredVariation;
-            using(var snapshot=CaptureNative("desktop-glass-unblurred-test.png"))clearVariation=StripeVariation(snapshot);
-            ApplyGlassMode();await Task.Delay(350);
-            using(var snapshot=CaptureNative("desktop-glass-dark.png"))blurredVariation=StripeVariation(snapshot);
-            VerifyInputOwnership();
-            File.WriteAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.json"),new JavaScriptSerializer().Serialize(new {clearVariation,blurredVariation,inputOwnership="PASS"}));
-            if(clearVariation<10 || blurredVariation>clearVariation*.65)throw new Exception("Desktop blur did not soften backdrop stripes: "+clearVariation+" -> "+blurredVariation);
-            await core.ExecuteScriptAsync("document.querySelector('[data-theme=light][type=button]').click()");await Task.Delay(250);
-            using(var snapshot=CaptureNative("desktop-glass-light.png")){}
-            VerifyInputOwnership();
-            await core.ExecuteScriptAsync("document.querySelector('[data-theme=dark][type=button]').click();document.querySelector('#glass-toggle').click()");await Task.Delay(250);
-            if(glassMode || nativeBlurApplied)throw new Exception("Glass did not turn off");
+            backdrop.Show();BringToFront();Activate();SetWindowPos(backdrop.Handle,blurLayer.Visible?blurLayer.Handle:Handle,0,0,0,0,0x13);await Task.Delay(350);
+            using(var first=CaptureNative("desktop-"+name+".png")){
+                string borderKey=name.Replace("glass-on","glass").Replace("glass-off","glass");
+                var colors=Array.ConvertAll(borderPoints,p=>first.GetPixel(p[0]+web.Left,p[1]+web.Top));
+                Color[] previous;
+                if(borderSamples.TryGetValue(borderKey,out previous)){
+                    for(int i=0;i<colors.Length;i++)if(Math.Abs(previous[i].R-colors[i].R)+Math.Abs(previous[i].G-colors[i].G)+Math.Abs(previous[i].B-colors[i].B)>6)throw new Exception("Glass changed border pixels: "+name+" panel="+i+" "+previous[i]+" -> "+colors[i]);
+                    File.AppendAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),borderKey+": unchanged border pixels PASS"+Environment.NewLine);
+                }else borderSamples.Add(borderKey,colors);
+                for(int i=0;i<3;i++){
+                    var pixel=first.GetPixel(points[i].X,points[i].Y);int expected=(points[i].X/8)%2==0?255:0;
+                    if(Math.Abs(pixel.R-expected)>3 || Math.Abs(pixel.G-expected)>3 || Math.Abs(pixel.B-expected)>3)throw new Exception("Gap is tinted or blurred: "+name+" "+points[i]+" "+pixel+" expected "+expected);
+                }
+                inverted=true;backdrop.Invalidate();await Task.Delay(250);
+                using(var second=CaptureNative("desktop-"+name+"-inverse.png")){
+                    for(int i=0;i<3;i++){
+                        var pixel=second.GetPixel(points[i].X,points[i].Y);int expected=(points[i].X/8)%2==0?0:255;
+                        if(Math.Abs(pixel.R-expected)>3 || Math.Abs(pixel.G-expected)>3 || Math.Abs(pixel.B-expected)>3)throw new Exception("Gap did not preserve desktop pixels: "+name);
+                    }
+                    var p=points[3];var one=first.GetPixel(p.X,p.Y);var two=second.GetPixel(p.X,p.Y);
+                    int difference=Math.Abs(one.R-two.R)+Math.Abs(one.G-two.G)+Math.Abs(one.B-two.B);
+                    if(translucent){
+                        double total=0,squared=0;int count=0;
+                        for(int x=p.X;x<p.X+160;x++){var pixel=first.GetPixel(x,p.Y);double value=(pixel.R+pixel.G+pixel.B)/3.0;total+=value;squared+=value*value;count++;}
+                        double mean=total/count,variation=Math.Sqrt(squared/count-mean*mean);
+                        if(!blurLayer.Visible || !blurLayer.BlurApplied || variation>5 || (lightTheme ? mean<175 || mean>230 : mean<25 || mean>80))throw new Exception("Desktop Gaussian blur failed: "+name+" variation="+variation+" mean="+mean);
+                        File.AppendAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),name+": native background blur PASS; variation="+variation+Environment.NewLine);
+                    }else if(difference>6 || blurLayer.Visible)throw new Exception("Glass off did not disable transparency and blur: "+name);
+                    File.AppendAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),name+": clear gaps PASS; panel delta="+difference+Environment.NewLine);
+                }
+            }
+            if(translucent){
+                // Keep the real window idle, then change only the background.
+                // No direct blur refresh is allowed here: this covers the shipped path.
+                await Task.Delay(2000);
+                using(var settled=CaptureNative("desktop-"+name+"-settled.png")){
+                    double total=0,squared=0;int count=0;var sample=points[3];
+                    for(int x=sample.X;x<sample.X+160;x++){var c=settled.GetPixel(x,sample.Y);double v=(c.R+c.G+c.B)/3.0;total+=v;squared+=v*v;count++;}
+                    double mean=total/count,variation=Math.Sqrt(squared/count-mean*mean);
+                    if(variation>5 || (lightTheme?mean<175||mean>230:mean<25||mean>80))throw new Exception("Glass disappeared or lost blur after settling: "+name);
+                }
+                solid=true;inverted=false;backdrop.Invalidate();await Task.Delay(400);
+                Color white,black;
+                using(var shot=CaptureNative("desktop-"+name+"-white.png"))white=shot.GetPixel(points[3].X,points[3].Y);
+                inverted=true;backdrop.Invalidate();await Task.Delay(400);
+                using(var shot=CaptureNative("desktop-"+name+"-black.png"))black=shot.GetPixel(points[3].X,points[3].Y);
+                int delta=Math.Abs(white.R-black.R)+Math.Abs(white.G-black.G)+Math.Abs(white.B-black.B);
+                if(delta<200 || delta>360)throw new Exception("Blur background is stale or opaque: "+name+" delta="+delta);
+                File.AppendAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),name+": stable blur after 2 seconds; live desktop fill delta="+delta+" PASS"+Environment.NewLine);
+            }
             VerifyInputOwnership();
         }
     }
-    async Task VerifyMaximizedMode(){
+    async Task VerifyGlassMode(){
         var core=web.CoreWebView2;
-        var originalBounds=Bounds;
+        File.WriteAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),"");
+        await VerifyPanelComposition("glass-off-dark",false);
+        await core.ExecuteScriptAsync("document.querySelector('#glass-toggle').click();document.activeElement.blur()");
+        if(!await Check("document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.canvas-panel')).backgroundColor==='rgba(0, 0, 0, 0.6)'",3) || !glassMode)throw new Exception("Panel transparency activation failed");
+        core.Reload();
+        if(!await Check("document.querySelector('#glass-toggle')?.getAttribute('aria-pressed')==='true' && document.querySelector('.desktop-window-controls') && localStorage.getItem('dlss-glass')==='on'",5))throw new Exception("Glass state did not persist");
+        if(!await Check("[...document.querySelectorAll('.glass')].every(e=>getComputedStyle(e).opacity==='1' && getComputedStyle(e,'::before').opacity==='1')",3))throw new Exception("Glass faded panel contents or borders");
+        await VerifyPanelComposition("glass-on-dark",true);
+        await core.ExecuteScriptAsync("document.querySelector('.advanced summary').click()");
+        if(!await Check("document.querySelector('#settings-dialog').open && getComputedStyle(document.querySelector('#settings-dialog')).backgroundColor==='rgba(0, 0, 0, 0.6)' && getComputedStyle(document.querySelector('#settings-dialog'),'::backdrop').backgroundColor==='rgba(0, 0, 0, 0)'",3))throw new Exception("Settings dialog transparency failed");
+        await core.ExecuteScriptAsync("document.querySelector('#settings-dialog .done').click();document.querySelector('[data-theme=light][type=button]').click();document.activeElement.blur()");
+        await VerifyPanelComposition("glass-on-light",true);
+        await core.ExecuteScriptAsync("document.querySelector('#glass-toggle').click();document.activeElement.blur()");
+        await VerifyPanelComposition("glass-off-light",false);
+        await core.ExecuteScriptAsync("document.querySelector('[data-theme=dark][type=button]').click()");
+    }
+    async Task VerifyMaximizedMode(){
+        var core=web.CoreWebView2;var originalBounds=Bounds;
         await core.ExecuteScriptAsync("document.querySelector('#glass-toggle').click();document.querySelector('.window-maximize').click()");
-        if(!await Check("document.documentElement.classList.contains('desktop-maximized') && document.querySelector('.window-maximize').getAttribute('aria-label')==='还原窗口' && document.querySelector('.window-maximize img').src.includes('restore.svg') && document.querySelector('#glass-toggle').disabled",5))throw new Exception("Maximize button or state synchronization failed");
-        if(WindowState!=FormWindowState.Maximized || nativeBlurApplied || transparentHost || web.DefaultBackgroundColor.A!=255)throw new Exception("Maximized host is not opaque");
-        if(Bounds!=Screen.FromHandle(Handle).WorkingArea)throw new Exception("Maximized bounds do not match the work area");
-        string opaque="getComputedStyle(document.body).backgroundColor.startsWith('rgb(') && [...document.querySelectorAll('.glass,.segmented,select,input[type=number]')].every(e=>getComputedStyle(e).backgroundColor.startsWith('rgb(') && getComputedStyle(e).opacity==='1') && [...document.querySelectorAll('button,button>.icon,.download')].every(e=>getComputedStyle(e).opacity==='1') && getComputedStyle(document.querySelector('.canvas-panel')).backdropFilter==='none'";
-        if(!await Check(opaque,3))throw new Exception("Maximized page still has translucent surfaces");
-        BringToFront();Activate();await Task.Delay(250);VerifyInputOwnership();
-        using(var file=File.Create(Path.Combine(service.Root,"desktop-maximized-dark.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,file);
-        await core.ExecuteScriptAsync("document.querySelector('[data-theme=light][type=button]').click()");
-        if(!await Check("document.documentElement.dataset.theme==='light' && "+opaque,3) || BackColor!=Color.FromArgb(233,235,238))throw new Exception("Maximized light theme is not opaque");
-        using(var file=File.Create(Path.Combine(service.Root,"desktop-maximized-light.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,file);
+        if(!await Check("document.documentElement.classList.contains('desktop-maximized') && document.querySelector('.window-maximize').getAttribute('aria-label')==='还原窗口' && document.querySelector('.window-maximize img').src.includes('restore.svg') && document.querySelector('#glass-toggle').disabled && document.documentElement.dataset.glass==='off' && document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='false' && localStorage.getItem('dlss-glass')==='on'",5))throw new Exception("Maximize did not force glass off while retaining preference");
+        if(WindowState!=FormWindowState.Maximized || Bounds!=Screen.FromHandle(Handle).WorkingArea)throw new Exception("Maximized bounds do not match the work area");
+        foreach(var theme in new[]{"dark","light"}){
+            await core.ExecuteScriptAsync("document.querySelector('[data-theme="+theme+"][type=button]').click();document.activeElement.blur()");
+            string fill=theme=="light"?"rgb(255, 255, 255)":"rgb(0, 0, 0)";
+            if(!await Check("getComputedStyle(document.body).backgroundColor==='"+fill+"' && [...document.querySelectorAll('.glass')].every(e=>getComputedStyle(e).opacity==='1' && getComputedStyle(e).backdropFilter==='none')",3) || transparentHost || web.DefaultBackgroundColor.A!=255 || blurLayer.Visible || glassMode)throw new Exception("Maximized canvas is not opaque: "+theme);
+            using(var backdrop=new Form{FormBorderStyle=FormBorderStyle.None,ShowInTaskbar=false,TopMost=true,StartPosition=FormStartPosition.Manual,Bounds=Bounds,BackColor=Color.Magenta}){
+                backdrop.Show();BringToFront();Activate();await Task.Delay(300);
+                using(var shot=CaptureNative("desktop-maximized-opaque-"+theme+".png")){
+                    var pixel=shot.GetPixel(1,Height/2);var expected=theme=="light"?Color.White:Color.Black;
+                    if(pixel.R!=expected.R || pixel.G!=expected.G || pixel.B!=expected.B)throw new Exception("Maximized background leaked desktop: "+theme+" "+pixel);
+                }
+                VerifyInputOwnership();
+            }
+        }
+        core.Reload();
+        if(!await Check("document.querySelector('#glass-toggle')?.disabled && document.documentElement.dataset.glass==='off' && localStorage.getItem('dlss-glass')==='on'",5))throw new Exception("Reload lost maximized glass override");
         await core.ExecuteScriptAsync("document.querySelector('.window-minimize').click()");await Task.Delay(200);
-        if(WindowState!=FormWindowState.Minimized || !maximizedState)throw new Exception("Minimize lost the maximized state");
+        if(WindowState!=FormWindowState.Minimized || !maximizedState || blurLayer.Visible)throw new Exception("Minimize lost maximized state or left blur visible");
         WindowState=FormWindowState.Maximized;await Task.Delay(200);
         await core.ExecuteScriptAsync("document.querySelector('[data-theme=dark][type=button]').click();document.querySelector('.window-maximize').click()");
-        if(!await Check("!document.documentElement.classList.contains('desktop-maximized') && document.querySelector('.window-maximize').getAttribute('aria-label')==='最大化窗口' && !document.querySelector('#glass-toggle').disabled && document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.canvas-panel')).backgroundColor==='rgba(0, 0, 0, 0.85)' && getComputedStyle(document.querySelector('#upload-button')).backgroundColor==='rgba(0, 0, 0, 0.95)'",5))throw new Exception("Restore did not preserve glass opacity and button state");
-        if(Bounds!=originalBounds || !transparentHost || !nativeBlurApplied || !glassMode)throw new Exception("Restore did not recover native glass or window bounds");
+        if(!await Check("!document.documentElement.classList.contains('desktop-maximized') && !document.querySelector('#glass-toggle').disabled && document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='true'",5) || Bounds!=originalBounds || !transparentHost || !glassMode || !blurLayer.Visible)throw new Exception("Restore did not recover glass and window bounds");
+        await VerifyPanelComposition("restored-glass-on-dark",true);
+        Location=new Point(Location.X+12,Location.Y+12);await Task.Delay(150);
+        if(blurLayer.Bounds!=RectangleToScreen(ClientRectangle))throw new Exception("Blur layer did not follow window movement");
+        Bounds=originalBounds;
         await core.ExecuteScriptAsync("document.querySelector('#glass-toggle').click();document.querySelector('.topbar').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,detail:2}))");
-        if(!await Check("document.documentElement.classList.contains('desktop-maximized')",3) || glassMode || nativeBlurApplied || transparentHost)throw new Exception("Title bar maximize failed with glass off");
+        if(!await Check("document.documentElement.classList.contains('desktop-maximized') && document.querySelector('#glass-toggle').disabled",3) || glassMode || transparentHost || blurLayer.Visible)throw new Exception("Title bar maximize failed with glass off");
         await core.ExecuteScriptAsync("document.querySelector('.window-maximize').click()");
-        if(!await Check("!document.documentElement.classList.contains('desktop-maximized') && document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='false'",3) || glassMode || nativeBlurApplied || !transparentHost)throw new Exception("Restore enabled glass unexpectedly");
+        if(!await Check("!document.documentElement.classList.contains('desktop-maximized') && document.querySelector('#glass-toggle').getAttribute('aria-pressed')==='false'",3) || glassMode || !transparentHost || blurLayer.Visible)throw new Exception("Restore enabled glass unexpectedly");
+        File.AppendAllText(Path.Combine(service.Root,"desktop-glass-diagnostics.txt"),"maximize: forced glass off; black/white opaque canvas; reload, minimize, restore and movement PASS"+Environment.NewLine);
     }
-    [StructLayout(LayoutKind.Sequential)] struct AccentPolicy{public int State,Flags,Color,Animation;}
-    [StructLayout(LayoutKind.Sequential)] struct CompositionAttributeData{public int Attribute;public IntPtr Data,Size;}
-    [DllImport("user32.dll")] [return:MarshalAs(UnmanagedType.Bool)] static extern bool SetWindowCompositionAttribute(IntPtr window,ref CompositionAttributeData data);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int w,int h,uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
     [StructLayout(LayoutKind.Sequential)] struct DwmBlurBehind{public uint Flags;[MarshalAs(UnmanagedType.Bool)] public bool Enable;public IntPtr Region;[MarshalAs(UnmanagedType.Bool)] public bool TransitionOnMaximized;}
     [DllImport("dwmapi.dll")] static extern int DwmEnableBlurBehindWindow(IntPtr window,ref DwmBlurBehind blur);

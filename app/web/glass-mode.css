@@ -4,52 +4,48 @@
 [data-theme] .glass-toggle.active{color:var(--active-text);border-color:var(--mint);background:var(--control);box-shadow:inset 0 0 0 .5px var(--mint),0 0 8px #67ffd51c}
 .desktop-shell .desktop-actions{gap:12px}
 
-/* Only the surface color has alpha. Children are never faded as a group. */
-/* 85% opaque cards and 95% opaque control fills. */
-:root[data-glass=on]{--frost-face:rgba(0,0,0,.85);--frost-control:rgba(0,0,0,.95);--frost-edge:rgba(196,233,244,.35);--frost-shadow:inset 0 1px 0 #ffffff2b,0 12px 28px #0003}
-:root[data-glass=on][data-theme=light]{--frost-face:rgba(246,248,250,.85);--frost-control:rgba(246,248,250,.95);--frost-edge:rgba(255,255,255,.8);--frost-shadow:inset 0 1px 0 #fff9,0 8px 22px #26334826}
-[data-glass=on][data-theme] .glass,
-[data-glass=on][data-theme] dialog,
-[data-glass=on][data-theme] .notice{
-  background:var(--frost-face);
-  border-color:var(--frost-edge);
-  box-shadow:var(--frost-shadow);
-  backdrop-filter:blur(24px) saturate(115%);
-  -webkit-backdrop-filter:blur(24px) saturate(115%);
-  opacity:1;
+/* Separate face and border paint: an opaque border gradient beneath the face
+   would block the desktop even when the face itself has alpha. */
+:where([data-theme]) .glass{position:relative}
+[data-theme] .glass{opacity:1}
+[data-theme=dark] .glass{background:var(--face) padding-box}
+[data-theme=dark] .glass::before{
+  content:"";position:absolute;inset:0;padding:1px;border-radius:inherit;pointer-events:none;
+  background:radial-gradient(ellipse 58px 16px at var(--glint-a),#ffffff 0%,#f0ffff 9%,#d9ffffb3 32%,transparent 100%),
+    radial-gradient(ellipse 44px 12px at var(--glint-b),#f2ffff 0%,#ddefff 10%,#bcaee799 30%,transparent 100%),var(--edge);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+  mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  mask-composite:exclude;
 }
-[data-glass=on][data-theme] .start-button{color:var(--active-text);border-color:var(--mint)}
-[data-glass=on][data-theme] .start-button:disabled{color:var(--muted);border-color:var(--frost-edge);opacity:1}
-[data-glass=on][data-theme] .start-button:disabled>.icon{opacity:1}
-[data-glass=on][data-theme] .glass-button,
-[data-glass=on][data-theme] .start-button,
-[data-glass=on][data-theme] .segmented,
-[data-glass=on][data-theme] select,
-[data-glass=on][data-theme] input[type=number],
-[data-glass=on][data-theme] summary{background:var(--frost-control);opacity:1}
-/* Selection uses its border and text color without stacking another fill. */
-[data-glass=on][data-theme] .segmented button.active{background:transparent}
-[data-glass=on] .glass-toggle.active{box-shadow:inset 0 0 0 .5px var(--mint),0 0 8px #67ffd51c}
-[data-glass=on][data-theme] button,
-[data-glass=on][data-theme] button>.icon,
-[data-glass=on][data-theme] .download{opacity:1}
-[data-glass=on][data-theme] button:disabled,
-[data-glass=on][data-theme] .download.disabled{color:var(--muted)}
+[data-theme=dark] .start-button{
+  --face:linear-gradient(161deg,#3e655e 0%,#152f29 8%,#04120e 25%,#010705 64%,#082017 90%,#163c2b 100%);
+  --edge:linear-gradient(115deg,#f4fffc 0%,#a0f7db 7%,#397c79 23%,#075460 41%,#73aaa8 57%,#eeffff 65%,#b7afd3 67%,#477d91 72%,#075c68 89%,#baffdf 100%);
+}
+[data-theme=dark] .start-button::before{background:var(--edge)}
+[data-theme=light] .start-button{background:var(--light-card)}
+
+/* Only the panel fill changes: 60% opaque, 40% desktop visible.
+   Text, controls, borders and reflections retain their existing paint. */
+:root{--panel-translucent:rgba(0,0,0,.6)}
+:root[data-theme=light]{--panel-translucent:rgba(246,248,250,.6)}
+[data-glass=on][data-theme] .glass,
+[data-glass=on][data-theme] dialog{background:var(--panel-translucent) padding-box;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+[data-theme] .start-button:disabled{opacity:1;color:var(--muted)}
+[data-theme] .start-button:disabled>.icon{opacity:1}
+
+/* Desktop gaps stay clear in every window state. Reflections stay inside panels. */
+html.desktop-shell,html.desktop-shell body{background:transparent}
+html.desktop-shell{--window-fill:#000}
+html.desktop-shell[data-theme=light]{--window-fill:#fff}
+html.desktop-shell.desktop-maximized,html.desktop-shell.desktop-maximized body{background:var(--window-fill)}
+html.desktop-shell.desktop-maximized .glass,html.desktop-shell.desktop-maximized dialog{backdrop-filter:none;-webkit-backdrop-filter:none}
+html.desktop-shell[data-theme] .glass,
+html.desktop-shell[data-theme] .glass:hover,
+html.desktop-shell[data-theme] dialog{box-shadow:inset 0 1px 1px #ffffff20}
+html.desktop-shell[data-theme] dialog::backdrop{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
 @media(max-width:760px){
   .appearance-controls{grid-column:2;grid-row:1;gap:6px}
   .appearance-controls .theme-switch{width:72px;grid-column:auto;grid-row:auto}
   .glass-toggle{padding:0 10px}
 }
-
-/* Maximized native windows have a solid canvas, regardless of the saved glass choice. */
-html.desktop-shell.desktop-maximized,
-html.desktop-shell.desktop-maximized body{background:var(--bg)}
-html.desktop-shell.desktop-maximized[data-theme]{--frost-face:var(--surface);--frost-control:var(--control)}
-html.desktop-shell.desktop-maximized .glass,
-html.desktop-shell.desktop-maximized dialog,
-html.desktop-shell.desktop-maximized .notice{backdrop-filter:none;-webkit-backdrop-filter:none;opacity:1}
-html.desktop-shell.desktop-maximized button,
-html.desktop-shell.desktop-maximized button>.icon,
-html.desktop-shell.desktop-maximized .download{opacity:1}
-html.desktop-shell.desktop-maximized button:disabled,
-html.desktop-shell.desktop-maximized .download.disabled{color:var(--muted)}

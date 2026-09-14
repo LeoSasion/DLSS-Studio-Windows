@@ -7,13 +7,13 @@
   const click=selector=>document.querySelector(selector).click();
   const checkpoint=async phase=>{test.phase=phase;test.resume=false;await wait(()=>test.resume,'Screenshot acknowledgment')};
   const seek=async time=>{const el=document.querySelector('#video-timeline');el.value=time;el.dispatchEvent(new Event('input',{bubbles:true}));await wait(()=>!videoPlayer.source.seeking&&Math.abs(videoPlayer.source.currentTime-time)<.01,'Source seek');await delay(100)};
-  const single=async()=>{click('#frame-test-button');assert(videoPlayer.source.paused&&videoPlayer.result.paused,'Frame test must pause synchronously');await wait(()=>!state.busy&&state.framePreview?.job.status==='done','Single-frame render',120000);await wait(()=>videoPlayer.canCompare(),'Frame images loaded')};
+  const single=async()=>{renderFrame();assert(videoPlayer.source.paused&&videoPlayer.result.paused,'Frame test must pause synchronously');await wait(()=>!state.busy&&state.framePreview?.job.status==='done','Single-frame render',120000);await wait(()=>videoPlayer.canCompare(),'Frame images loaded')};
   try{
     click('[data-mode=video]');
     const blob=await(await fetch('data:video/mp4;base64,'+window.__videoFixture)).blob(),transfer=new DataTransfer();
     transfer.items.add(new File([blob],'video-compare.mp4',{type:'video/mp4'}));
     const input=document.querySelector('#file-input');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
-    await wait(()=>!state.uploading&&videoPlayer.canCapture()&&!document.querySelector('#frame-test-button').disabled,'Video upload');
+    await wait(()=>!state.uploading&&videoPlayer.canCapture(),'Video upload');
     const source=videoPlayer.source,result=videoPlayer.result,originalUrl=source.src,originalAsset=state.asset.id;
     const size=document.querySelector('#size-preset');size.selectedIndex=0;size.dispatchEvent(new Event('change',{bubbles:true}));
     await seek(1.25);click('#video-play');await wait(()=>!source.paused&&source.currentTime>1.3,'Source playing');
@@ -31,7 +31,7 @@
     assert(document.querySelector('#video-frame-result').style.clipPath.includes('35%'),'Frame divider does not move');
     await checkpoint('frame');
     await seek(2);assert(!state.framePreview&&document.querySelector('[data-view=compare]').disabled,'Seeking did not clear the frame preview');
-    form.elements.frames.value=16;form.elements.codec.value='prores';form.elements.codec.dispatchEvent(new Event('change',{bubbles:true}));
+    const endHandle=document.querySelector('#trim-end');endHandle.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}));for(let i=0;i<2;i++)endHandle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',shiftKey:true,bubbles:true}));form.elements.codec.value='prores';form.elements.codec.dispatchEvent(new Event('change',{bubbles:true}));
     click('#start-button');await wait(()=>!state.busy&&state.output?.status==='done','Full video render',180000);await wait(()=>videoPlayer.canCompare(),'Video preview load');
     assert(state.asset.id===originalAsset&&source.src===originalUrl,'Full processing did not retain original media');
     assert(Math.abs(source.duration-4)<.1&&Math.abs(result.duration-2)<.2,'Expected limited processed duration');

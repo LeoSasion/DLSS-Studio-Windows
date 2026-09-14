@@ -8,6 +8,7 @@
 #zoom-level{font-size:12px;color:var(--muted);min-width:38px;text-align:center;font-variant-numeric:tabular-nums}
 .zoom-controls button[aria-pressed=true]{border-color:var(--mint);color:var(--active-text)}
 .preview-tools button:disabled{color:var(--muted);opacity:.6}
+[data-glass=on][data-theme] .preview-tools button:disabled{opacity:1}
 #image-stage,#video-viewport{transform-origin:center;flex-shrink:0}
 .pan-enabled,.pan-enabled #compare-slider,.pan-enabled #video-compare-slider{cursor:grab;touch-action:none}
 .pan-enabled:active{cursor:grabbing}
@@ -22,12 +23,9 @@
 #progress-bar::-webkit-progress-value{background:var(--mint);border-radius:2px}
 #progress-bar:not([value]){background:var(--line)}
 .canvas-panel:has(.job-progress:not([hidden])) .notice{position:static;margin-top:10px}
-.video-time,.video-mute,.file-info span,.engine-status #gpu-status,#status-button,.range-bounds{font-size:12px}
+.file-info span,.engine-status #gpu-status,#status-button,.range-bounds{font-size:12px}
 .inspector .helper{font-size:12px}
 .image-label{font-size:12px}
-.video-transport{grid-template-columns:32px minmax(50px,1fr) auto auto auto}
-.video-transport .icon-button,.video-mute{height:32px}
-#video-timeline{height:6px}
 .history-dialog{width:min(640px,calc(100% - 24px));max-height:calc(100dvh - 24px);padding:20px;overflow:hidden}
 .history-heading{display:flex;align-items:center;gap:14px;margin-bottom:14px}
 .history-heading h2{font-size:17px;margin:0;flex:1}
@@ -47,7 +45,6 @@
 .cache-options{display:grid;gap:16px;padding:6px 0 12px}
 .cache-options .check-row{font-size:13px;line-height:1.6}
 .history-dialog .error{color:var(--text);border:1px solid var(--border);padding:10px}
-@media(max-width:1100px){.video-transport{grid-template-columns:32px minmax(40px,1fr) auto auto}}
 @media(max-width:760px){
  .brand-group{flex-direction:column;align-items:flex-start;gap:0}
  .engine-status{padding-left:28px;border-left:0;max-width:100%;font-size:12px}
@@ -61,8 +58,7 @@
  .history-item strong{font-size:14px}.history-item p,.history-message{font-size:13px}
  .settings-page label select,.settings-page label input[type=number],.inspector select,.inspector input[type=number]{font-size:16px;min-height:36px}
  .settings-page .check-row{min-height:36px}
- .video-time,#status-button,.output-info strong{font-size:12px}
- .video-transport{gap:7px}.frame-test{height:36px}
+ #status-button,.output-info strong{font-size:12px}
  #video-source-label{max-width:65%;overflow:hidden;text-overflow:ellipsis}
 }
 @media(max-width:420px){.zoom-controls{gap:3px}.preview-tools .glass-button{padding:0 7px}.history-footer{gap:7px}}

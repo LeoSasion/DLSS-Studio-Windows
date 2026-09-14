@@ -10,7 +10,7 @@ ACTIVE = {"queued", "running", "cancelling"}
 def save(path, root, assets, jobs):
     def portable(record):
         item = dict(record)
-        for key in ("path", "result_path", "preview_path"):
+        for key in ("path", "result_path", "preview_path", "thumbnail_path"):
             if item.get(key):
                 item[key] = Path(item[key]).resolve().relative_to(root.resolve()).as_posix()
         return item
@@ -37,7 +37,7 @@ def load(path, root):
     for kind, target in (("assets", assets), ("jobs", jobs)):
         for saved in value.get(kind, []):
             item = dict(saved)
-            for key in ("path", "result_path", "preview_path"):
+            for key in ("path", "result_path", "preview_path", "thumbnail_path"):
                 if item.get(key):
                     resolved = (root / item[key]).resolve()
                     allowed = root / ("uploads" if key == "path" else "ui_out")

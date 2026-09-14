@@ -109,10 +109,12 @@ OutputSize = Literal["原始尺寸（不放大）", "720p (1280×720)", "1080p (
 
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     asset_id: str
     request_id: str | None = Field(None, max_length=64)
-    job_kind: Literal["full", "frame"] = "full"
+    job_kind: Literal["full", "frame", "clip"] = "full"
+    clip_start: float = Field(0, ge=0)
+    clip_duration: float = Field(3, gt=0)
     source_asset_id: str | None = None
     frame_time: float | None = Field(None, ge=0)
     size: OutputSize = "原始尺寸（不放大）"
@@ -174,6 +176,8 @@ def build_command(s, item, folder, selection):
         args.append("--nr-motion-vis")
     if s.frames:
         args += ["--frames", str(s.frames)]
+    if s.job_kind == "clip":
+        args += ["--start", str(s.clip_start), "--duration", str(s.clip_duration)]
     return args
 
 
@@ -229,6 +233,8 @@ def upload(file: UploadFile = File(...)):
         item = {"id": aid, "name": name, "kind": kind, "width": w, "height": h,
                 "bytes": path.stat().st_size, "path": str(path), "url": f"/api/assets/{aid}",
                 "created_at": time.time()}
+        if kind == "video":
+            item.update(duration=info.get("duration", 0), fps=info["fps"])
         with mutex:
             assets[aid] = item
             try:
@@ -324,12 +330,23 @@ def render(jid, s, item, selection):
             if (s.container, s.codec) not in engine.BROWSER_PLAYABLE:
                 update_job(jid, phase="preview", progress=None, message="增强已完成，正在生成预览…", eta=None)
                 preview = engine.make_preview(str(result), runner=group, nvenc=NVENC_AVAILABLE)
+        thumbnail = result if item["kind"] == "image" else None
+        if item["kind"] == "video":
+            thumbnail = folder / "thumbnail.jpg"
+            thumb_proc = group.start([engine.find_tool("ffmpeg"), "-v", "error", "-i", str(preview or result),
+                "-frames:v", "1", "-vf", "scale=160:-2", str(thumbnail)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            thumb_proc.wait()
+            group.check()
+            if not thumbnail.is_file():
+                thumbnail = None
         with mutex:
             group.check()
             GPU.mark_verified(selection)
             update_job(jid, save=True, status="done", phase="done", progress=100, eta=None,
                 message="处理完成，可以查看并下载结果。", result_path=str(result), width=width, height=height,
                 preview_path=str(preview) if preview else None, finished_at=time.time(),
+                thumbnail_path=str(thumbnail) if thumbnail else None,
+                thumbnail=f"/api/jobs/{jid}/thumbnail" if thumbnail else None,
                 download=f"/api/jobs/{jid}/download", preview=f"/api/jobs/{jid}/preview" if preview else None,
                 hardware=GPU.public())
     except RenderCancelled:
@@ -366,6 +383,12 @@ def start_job(s: Settings):
             source = assets.get(s.source_asset_id)
             if item["kind"] != "image" or not source or source["kind"] != "video" or s.frame_time is None:
                 raise HTTPException(400, "单帧测试缺少原视频或时间点，请重新测试。")
+        if s.job_kind == "clip":
+            if item["kind"] != "video" or s.frames:
+                raise HTTPException(400, "短片段需要视频素材，不能同时限制帧数。")
+            duration = item.get("duration") or nr_video.probe(engine.find_tool("ffprobe"), item["path"])["duration"]
+            if s.clip_start >= duration or s.clip_start + s.clip_duration > duration + .001:
+                raise HTTPException(400, "片段超出视频范围，请调整起点或时长。")
         try:
             selection = GPU.prepare()
         except RuntimeError as exc:
@@ -373,7 +396,8 @@ def start_job(s: Settings):
         jid = uuid.uuid4().hex
         jobs[jid] = {"id": jid, "status": "queued", "phase": "queued", "message": "准备开始处理…", "log": "",
             "request_id": s.request_id, "asset_id": s.asset_id, "source_asset_id": s.source_asset_id,
-            "job_kind": s.job_kind, "frame_time": s.frame_time, "settings": s.model_dump(), "created_at": time.time()}
+            "job_kind": s.job_kind, "frame_time": s.frame_time, "clip_start": s.clip_start if s.job_kind == "clip" else 0,
+            "settings": s.model_dump(), "created_at": time.time()}
         try:
             persist()
         except OSError as exc:
@@ -390,11 +414,46 @@ def start_job(s: Settings):
 
 
 @api.get("/api/jobs")
-def recent_jobs(offset: int = 0, limit: int = 20):
+def recent_jobs(offset: int = 0, limit: int = 20, source: str | None = None):
     with mutex:
         ordered = sorted(jobs.values(), key=lambda j: j.get("created_at", 0), reverse=True)
+        if source:
+            ordered = [j for j in ordered if (j.get("source_asset_id") or j.get("asset_id")) == source]
         return {"jobs": [public_job(j) for j in ordered[max(0, offset):max(0, offset)+max(1, min(limit, 50))]],
                 "total": len(ordered), "active": [public_job(j) for j in ordered if j["status"] in ACTIVE]}
+
+
+@api.get("/api/history/sources")
+def history_sources():
+    with mutex:
+        groups = {}
+        for job in sorted(jobs.values(), key=lambda j: j.get("created_at", 0), reverse=True):
+            aid = job.get("source_asset_id") or job.get("asset_id")
+            if aid not in groups:
+                groups[aid] = {"id": aid, "name": assets.get(aid, {}).get("name", "素材已清理"), "count": 0}
+            groups[aid]["count"] += 1
+        return {"sources": list(groups.values())}
+
+
+class JobLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(max_length=80)
+    favorite: bool
+
+
+@api.patch("/api/jobs/{jid}")
+def label_job(jid: str, label: JobLabel):
+    with mutex:
+        if jid not in jobs:
+            raise HTTPException(404, "任务不存在，可能已被清理。")
+        previous = dict(jobs[jid])
+        jobs[jid].update(name=label.name.strip(), favorite=label.favorite)
+        try:
+            persist()
+        except OSError as exc:
+            jobs[jid] = previous
+            raise HTTPException(507, "版本标记无法保存，请检查磁盘空间。") from exc
+        return public_job(jobs[jid])
 
 
 @api.get("/api/jobs/{jid}")
@@ -424,9 +483,9 @@ def cancel_job(jid: str):
 def result_file(jid: str, action: str):
     with mutex:
         job = jobs.get(jid, {})
-        if job.get("status") != "done" or action not in {"download", "preview"}:
+        if job.get("status") != "done" or action not in {"download", "preview", "thumbnail"}:
             raise HTTPException(404, "结果尚未准备好。")
-        path = job.get("result_path" if action == "download" else "preview_path")
+        path = job.get({"download": "result_path", "preview": "preview_path", "thumbnail": "thumbnail_path"}[action])
         if not path or not Path(path).is_file():
             raise HTTPException(404, "此预览或结果已失效，请重新处理。")
         return FileResponse(path, filename=Path(path).name if action == "download" else None)
@@ -436,6 +495,7 @@ class Cleanup(BaseModel):
     keep_asset_ids: list[str] = Field(default_factory=list, max_length=100)
     keep_job_ids: list[str] = Field(default_factory=list, max_length=100)
     include_results: bool = False
+    preview_token: str | None = None
 
 
 def folder_bytes(folder):
@@ -460,37 +520,57 @@ def cache_stats():
         return {"bytes": folder_bytes(UPLOADS) + folder_bytes(OUTPUTS), "assets": len(assets), "jobs": len(jobs)}
 
 
+def cleanup_plan(request):
+    keep_jobs = set(request.keep_job_ids) | {j["id"] for j in jobs.values() if j["status"] in ACTIVE or j.get("favorite")}
+    if not request.include_results:
+        keep_jobs |= {j["id"] for j in jobs.values() if j["status"] == "done"}
+    keep_assets = set(request.keep_asset_ids) | uploading_ids
+    for jid in keep_jobs:
+        job = jobs.get(jid, {})
+        keep_assets.update(a for a in (job.get("asset_id"), job.get("source_asset_id")) if a)
+    keep_assets |= {a["id"] for a in assets.values() if time.time() - a.get("created_at", 0) < 3600}
+    candidates = []
+    for parent, keep, records in ((OUTPUTS, keep_jobs, jobs), (UPLOADS, keep_assets, assets)):
+        for folder in sorted(parent.iterdir()):
+            if not folder.is_dir() or folder.name in keep or not re.fullmatch(r"[0-9a-f]{32}", folder.name):
+                continue
+            if folder.resolve().parent != parent.resolve() or folder.is_symlink() or getattr(folder.lstat(), "st_file_attributes", 0) & 0x400:
+                continue
+            if parent == OUTPUTS and folder.name not in jobs and not request.include_results:
+                if any(f.is_file() and f.stat().st_size for f in folder.iterdir()):
+                    continue
+            record = records.get(folder.name, {})
+            asset = assets.get(record.get("source_asset_id") or record.get("asset_id"), {})
+            candidates.append({"id": folder.name, "kind": "asset" if parent == UPLOADS else "result" if record.get("status") == "done" else "temporary",
+                "name": record.get("name") or asset.get("name") or "未完成或旧版文件", "bytes": folder_bytes(folder)})
+    token = hashlib.sha256(json.dumps(candidates, sort_keys=True).encode()).hexdigest()
+    return candidates, keep_jobs, token
+
+
+@api.post("/api/cache/preview")
+def preview_cleanup(request: Cleanup):
+    with mutex:
+        candidates, _, token = cleanup_plan(request)
+        counts = {kind: sum(i["kind"] == kind for i in candidates) for kind in ("temporary", "asset", "result")}
+        return {"items": candidates, "bytes": sum(i["bytes"] for i in candidates), "counts": counts, "preview_token": token}
+
+
 @api.post("/api/cache/cleanup")
 def cleanup_cache(request: Cleanup):
     removed, skipped, freed = 0, 0, 0
     with mutex:
-        # Other open tabs and all active pipelines retain recently uploaded/current assets.
-        keep_jobs = set(request.keep_job_ids) | {j["id"] for j in jobs.values() if j["status"] in ACTIVE}
-        if not request.include_results:
-            keep_jobs |= {j["id"] for j in jobs.values() if j["status"] == "done"}
-        keep_assets = set(request.keep_asset_ids) | uploading_ids
-        for jid in keep_jobs:
-            job = jobs.get(jid, {})
-            keep_assets.update(a for a in (job.get("asset_id"), job.get("source_asset_id")) if a)
-        keep_assets |= {a["id"] for a in assets.values() if time.time() - a.get("created_at", 0) < 3600}
-        for parent, keep, records in ((OUTPUTS, keep_jobs, jobs), (UPLOADS, keep_assets, assets)):
-            for folder in parent.iterdir():
-                if not folder.is_dir() or folder.name in keep or not re.fullmatch(r"[0-9a-f]{32}", folder.name):
-                    continue
-                # Older releases have no metadata. Keep successful-looking legacy results
-                # unless the user explicitly opts into clearing completed results too.
-                if parent == OUTPUTS and folder.name not in jobs and not request.include_results:
-                    if any(f.is_file() and f.stat().st_size for f in folder.iterdir()):
-                        continue
-                try:
-                    size = folder_bytes(folder)
-                    remove_folder(folder, parent)
-                    records.pop(folder.name, None)
-                    removed += 1
-                    freed += size
-                except (OSError, ValueError):
-                    skipped += 1
-        # A mkdir failure can leave a terminal job with no output directory.
+        candidates, keep_jobs, token = cleanup_plan(request)
+        if request.preview_token is not None and request.preview_token != token:
+            raise HTTPException(409, "清理范围已变化，请刷新预览后重试。")
+        for entry in candidates:
+            parent, records = (UPLOADS, assets) if entry["kind"] == "asset" else (OUTPUTS, jobs)
+            try:
+                remove_folder(parent / entry["id"], parent)
+                records.pop(entry["id"], None)
+                removed += 1
+                freed += entry["bytes"]
+            except (OSError, ValueError):
+                skipped += 1
         for jid in list(jobs):
             if jid not in keep_jobs and not (OUTPUTS / jid).exists():
                 jobs.pop(jid)

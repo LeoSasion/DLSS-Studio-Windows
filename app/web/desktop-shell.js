@@ -33,14 +33,14 @@
     if (event.data?.type !== 'window-state') return;
     const maximized = event.data.maximized === true;
     document.documentElement.classList.toggle('desktop-maximized', maximized);
+    let preferred=false;
+    try{preferred=localStorage.getItem('dlss-glass')==='on'}catch{}
+    if(typeof glass==='function')glass(!maximized&&preferred,false);
     const button = controls.querySelector('.window-maximize');
     button.title = maximized ? '还原窗口' : '最大化窗口';
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-pressed', String(maximized));
     button.querySelector('img').src = `/assets/icons/${maximized ? 'restore' : 'maximize'}.svg`;
-    const glass = document.querySelector('#glass-toggle');
-    glass.disabled = maximized;
-    glass.title = maximized ? '最大化时使用不透明外观，还原后恢复玻璃设置' : document.documentElement.dataset.glass === 'on' ? '关闭毛玻璃面板' : '开启毛玻璃面板';
   });
   header.addEventListener('mousedown', event => {
     if (event.button !== 0 || event.target.closest('button, a, input, select')) return;
@@ -52,5 +52,23 @@
   };
   new MutationObserver(notifyAppearance).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','data-glass']});
   notifyAppearance();
+  let regionFrame=0,lastRegions='';
+  const scheduleRegions=()=>{
+    if(regionFrame)return;
+    regionFrame=requestAnimationFrame(()=>{
+      regionFrame=0;
+      const regions=[...document.querySelectorAll('.glass,dialog[open]')].flatMap(el=>{
+        const r=el.getBoundingClientRect(),s=getComputedStyle(el),d=devicePixelRatio;
+        return r.width&&r.height&&s.visibility!=='hidden'?[[r.left*d,r.top*d,r.width*d,r.height*d,(parseFloat(s.borderTopLeftRadius)||0)*d].map(Math.round)]:[];
+      });
+      const value=JSON.stringify(regions);
+      if(value!==lastRegions){lastRegions=value;send(`blur-regions:${value}`)}
+    });
+  };
+  const sizes=new ResizeObserver(scheduleRegions);
+  document.querySelectorAll('.glass').forEach(el=>sizes.observe(el));
+  new MutationObserver(scheduleRegions).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','open']});
+  window.addEventListener('resize',scheduleRegions);
+  scheduleRegions();
   send('window-state');
 })();

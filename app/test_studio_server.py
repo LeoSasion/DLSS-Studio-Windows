@@ -91,6 +91,64 @@ class StudioContractTests(unittest.TestCase):
         for key, value in (("--codec","prores"),("--frames","30"),("--audio","none")):
             self.assertEqual(cmd[cmd.index(key)+1],value)
 
+    def test_clip_bounds_and_command_preserve_source_offset(self):
+        item = self.upload()
+        server.assets[item['id']].update(kind='video', duration=4, fps=8)
+        base = dict(asset_id=item['id'], job_kind='clip', codec='prores', container='mov')
+        for values in ({'clip_start':4}, {'clip_start':2,'clip_duration':3}, {'frames':2}, {'clip_duration':0}):
+            self.assertIn(self.client.post('/api/jobs', json={**base, **values}).status_code, (400,422))
+        with patch.object(server.worker, 'submit'):
+            response = self.client.post('/api/jobs', json={**base,'clip_start':1,'clip_duration':2})
+        self.assertEqual(response.status_code,200,response.text)
+        job = server.jobs[response.json()['id']]
+        s = server.Settings(**job['settings'])
+        command = server.build_command(s, server.assets[item['id']], self.outputs, self.selection)
+        self.assertEqual(command[command.index('--start')+1], '1.0')
+        self.assertEqual(command[command.index('--duration')+1], '2.0')
+        self.assertEqual(job['clip_start'],1)
+
+    def test_timeline_selection_can_exceed_sixty_seconds_within_source(self):
+        item = self.upload()
+        server.assets[item['id']].update(kind='video', duration=120, fps=30)
+        payload = dict(asset_id=item['id'], job_kind='clip', codec='prores', container='mov', clip_start=20, clip_duration=80)
+        self.assertEqual(self.client.post('/api/jobs', json={**payload, 'clip_start':50}).status_code,400)
+        with patch.object(server.worker, 'submit'):
+            response = self.client.post('/api/jobs', json=payload)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(server.jobs[response.json()['id']]['settings']['clip_duration'],80)
+
+    def test_version_labels_survive_restart_and_sources_group_frames(self):
+        item = self.upload(); jid = self.job(item); self.render_stub(jid,item)
+        response = self.client.patch(f'/api/jobs/{jid}',json={'name':'  满意版本  ','favorite':True})
+        self.assertEqual(response.status_code,200)
+        _, saved = server.studio_storage.load(server.STATE_FILE, self.root)
+        self.assertEqual(saved[jid]['name'],'满意版本');self.assertTrue(saved[jid]['favorite'])
+        self.assertIn('thumbnail_path',saved[jid])
+        frame = self.job(item);server.jobs[frame].update(source_asset_id=item['id'],job_kind='frame')
+        groups = self.client.get('/api/history/sources').json()['sources']
+        self.assertEqual(groups[0]['count'],2)
+        self.assertEqual(self.client.get('/api/jobs',params={'source':item['id']}).json()['total'],2)
+        self.assertEqual(self.client.patch(f'/api/jobs/{jid}',json={'name':'x'*81,'favorite':True}).status_code,422)
+
+    def test_cleanup_preview_is_read_only_and_rejects_stale_plan(self):
+        item=self.upload(); server.assets[item['id']]['created_at']=0
+        jid=self.job(item);self.render_stub(jid,item)
+        request={'include_results':True}
+        preview=self.client.post('/api/cache/preview',json=request).json()
+        self.assertEqual(preview['counts']['result'],1)
+        self.assertEqual(preview['counts']['asset'],1)
+        self.assertTrue((self.outputs/jid).exists())
+        server.jobs[jid]['favorite']=True
+        response=self.client.post('/api/cache/cleanup',json={**request,'preview_token':preview['preview_token']})
+        self.assertEqual(response.status_code,409)
+        protected=self.client.post('/api/cache/preview',json=request).json()
+        self.assertEqual(protected['items'],[])
+        server.jobs[jid]['favorite']=False
+        fresh=self.client.post('/api/cache/preview',json=request).json()
+        done=self.client.post('/api/cache/cleanup',json={**request,'preview_token':fresh['preview_token']}).json()
+        self.assertEqual(done['freed_bytes'],fresh['bytes'])
+        self.assertFalse((self.outputs/jid).exists())
+
     def test_renderer_failure_does_not_enable_download(self):
         item=self.upload(); jid=self.job(item); group=self.render_stub(jid,item,code=1)
         self.assertEqual(server.jobs[jid]["status"],"error")

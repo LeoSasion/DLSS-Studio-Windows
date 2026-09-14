@@ -1,6 +1,6 @@
 /* One source clock drives both videos. Frame previews never replace the source media. */
 window.StudioVideoPlayer = class StudioVideoPlayer {
-  constructor({onChange,onFrameCleared,onError}) {
+  constructor({onChange,onFrameCleared,onError,onSelectionChange,onViewChange}) {
     this.source=document.querySelector('#video-preview');
     this.result=document.querySelector('#video-result');
     this.stage=document.querySelector('#video-stage');
@@ -11,23 +11,31 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
     this.slider=document.querySelector('#video-compare-slider');
     this.line=document.querySelector('#video-compare-line');
     this.timeline=document.querySelector('#video-timeline');
+    this.track=document.querySelector('.video-track');
+    this.trimStart=document.querySelector('#trim-start');
+    this.trimEnd=document.querySelector('#trim-end');
+    this.selection={start:0,end:null};this.sourceLength=0;this.fps=30;
     this.playButton=document.querySelector('#video-play');
     this.muteButton=document.querySelector('#video-mute');
     this.loading=document.querySelector('#video-loading');
     this.timeLabel=document.querySelector('#video-time');
+    this.controls=this.stage.querySelector('.video-transport');
     this.playIcon=this.playButton.querySelector('img');
     this.transportCache={};
     this.onChange=onChange;this.onFrameCleared=onFrameCleared;this.onError=onError;
+    this.onSelectionChange=onSelectionChange;this.onViewChange=onViewChange;
     this.view='original';this.frame=null;this.locked=false;this.assetId=null;this.resultUrl=null;
-    this.resultFailed=false;this.sourceFailed=false;this.wantPlaying=false;this.buffering=false;this.raf=0;
+    this.resultOffset=0;this.resultFailed=false;this.sourceFailed=false;this.wantPlaying=false;this.buffering=false;this.raf=0;
     this.result.muted=true;
     this.playButton.addEventListener('click',()=>this.source.paused?this.play():this.pause());
     this.timeline.addEventListener('input',()=>this.seek(Number(this.timeline.value)));
+    this.bindSelection(this.trimStart,'start');this.bindSelection(this.trimEnd,'end');
+    this.bindTransportVisibility();
     this.muteButton.addEventListener('click',()=>{this.source.muted=!this.source.muted;this.paintTransport()});
     this.slider.addEventListener('input',()=>this.paintView());
     for(const event of ['loadedmetadata','loadeddata','canplay','durationchange']){
       this.source.addEventListener(event,()=>{this.fit();this.paint();this.resumeBuffered();this.onChange()});
-      this.result.addEventListener(event,()=>{this.sync(this.source.paused);this.paint();this.resumeBuffered();this.onChange()});
+      this.result.addEventListener(event,()=>{if(this.usingResult()&&this.source.currentTime<this.startTime())this.seek(this.startTime());this.sync(this.source.paused);this.paint();this.resumeBuffered();this.onChange()});
     }
     this.source.addEventListener('play',()=>{
       if(this.locked){this.pause();return}
@@ -68,16 +76,82 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
     const ms=Math.floor(value*1000),seconds=Math.floor(ms/1000),minutes=Math.floor(seconds/60);
     return `${String(minutes).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`;
   }
+  static playbackTime(value){
+    const total=Math.floor(Number.isFinite(value)?Math.max(0,value):0),hours=Math.floor(total/3600);
+    return `${hours?String(hours).padStart(2,'0')+':':''}${String(Math.floor(total/60)%60).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
+  }
+  paintControlsVisibility(){
+    this.stage.classList.toggle('controls-visible',!!(this.controlsNearBottom||this.controlsDragging||this.controlsKeyboard||this.controlsTouch));
+  }
+  clearControlsVisibility(){
+    clearTimeout(this.controlsTimer);
+    this.controlsNearBottom=this.controlsDragging=this.controlsKeyboard=this.controlsTouch=false;
+    this.paintControlsVisibility();
+  }
+  showTouchControls(){
+    clearTimeout(this.controlsTimer);this.controlsTouch=true;this.paintControlsVisibility();
+    this.controlsTimer=setTimeout(()=>{this.controlsTouch=false;this.paintControlsVisibility()},2800);
+  }
+  bindTransportVisibility(){
+    let touchOrigin=null;
+    this.stage.addEventListener('pointermove',event=>{
+      if(event.pointerType==='touch')return;
+      this.controlsKeyboard=false;
+      const rect=this.stage.getBoundingClientRect();
+      this.controlsNearBottom=event.clientY>=rect.bottom-72&&event.clientY<=rect.bottom&&event.clientX>=rect.left&&event.clientX<=rect.right;
+      this.paintControlsVisibility();
+    });
+    this.stage.addEventListener('pointerleave',()=>{this.controlsNearBottom=false;this.paintControlsVisibility()});
+    this.stage.addEventListener('pointerdown',event=>{
+      this.controlsKeyboard=false;
+      if(event.pointerType==='touch')touchOrigin={id:event.pointerId,x:event.clientX,y:event.clientY};
+      if(this.controls.contains(event.target)){
+        this.controlsDragging=!!event.target.closest('input[type=range],.trim-handle');
+        if(event.pointerType==='touch')this.showTouchControls();
+      }
+      this.paintControlsVisibility();
+    });
+    this.stage.addEventListener('pointerup',event=>{
+      if(event.pointerType==='touch'&&touchOrigin?.id===event.pointerId&&!this.controls.contains(event.target)&&Math.hypot(event.clientX-touchOrigin.x,event.clientY-touchOrigin.y)<8){
+        if(this.controlsTouch){this.controlsTouch=false;clearTimeout(this.controlsTimer)}else this.showTouchControls();
+        this.paintControlsVisibility();
+      }
+      touchOrigin=null;
+    });
+    const release=event=>{
+      if(this.controlsDragging&&event.pointerType==='touch')this.showTouchControls();
+      this.controlsDragging=false;this.paintControlsVisibility();
+    };
+    window.addEventListener('pointerup',release);window.addEventListener('pointercancel',release);
+    this.controls.addEventListener('focusin',event=>{
+      if(event.target.matches(':focus-visible')){this.controlsKeyboard=true;this.paintControlsVisibility()}
+    });
+    this.controls.addEventListener('focusout',()=>queueMicrotask(()=>{
+      if(!this.controls.contains(document.activeElement)){this.controlsKeyboard=false;this.paintControlsVisibility()}
+    }));
+    this.controls.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){
+        event.preventDefault();event.stopPropagation();document.activeElement.blur();this.clearControlsVisibility();
+      }else{this.controlsKeyboard=true;this.paintControlsVisibility()}
+    },true);
+    window.addEventListener('blur',()=>this.clearControlsVisibility());
+    this.paintControlsVisibility();
+  }
   setSource(asset){
     if(this.assetId===asset?.id)return;
+    this.clearControlsVisibility();
     this.pause();this.assetId=asset?.id||null;this.sourceFailed=false;
+    this.sourceLength=Number(asset?.duration)||0;this.fps=Number(asset?.fps)>0?Number(asset.fps):30;
+    this.selection={start:0,end:null};
     this.clearFrame(false);this.setResult(null);
     if(asset)this.source.src=asset.url;else this.source.removeAttribute('src');
     this.source.load();this.paint();
   }
-  setVisible(visible){this.stage.hidden=!visible;if(!visible)this.pause();else this.fit()}
-  setResult(url){
-    if(this.resultUrl===url)return;
+  setVisible(visible){this.visible=visible;this.stage.hidden=!visible;if(!visible){this.pause();this.loading.hidden=true;this.clearControlsVisibility()}else{this.fit();this.paintView()}}
+  setResult(url,offset=0,isClip=false){
+    this.resultClip=isClip;
+    if(this.resultUrl===url&&this.resultOffset===offset)return;
+    this.resultOffset=offset;
     this.result.pause();this.resultUrl=url||null;this.resultFailed=false;
     if(url)this.result.src=url;else this.result.removeAttribute('src');
     this.result.load();this.paint();
@@ -96,24 +170,87 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
     this.paint();
   }
   canCapture(){return !!this.assetId&&!this.sourceFailed&&this.source.readyState>=2&&!this.source.seeking&&this.source.videoWidth>0}
+  sourceDuration(){return this.assetId?(Number.isFinite(this.source.duration)?this.source.duration:this.sourceLength):0}
+  getSelection(){
+    const duration=this.sourceDuration(),gap=Math.min(1/this.fps,duration);
+    const start=Math.max(0,Math.min(Number(this.selection.start)||0,Math.max(0,duration-gap)));
+    const requestedEnd=this.selection.end===null?duration:Number(this.selection.end);
+    const end=Math.max(start+gap,Math.min(Number.isFinite(requestedEnd)?requestedEnd:duration,duration));
+    return {start,end,duration:Math.max(0,end-start),full:start===0&&Math.abs(end-duration)<.000001};
+  }
+  setSelection(selection){
+    this.selection={start:Number(selection?.start)||0,end:selection?.end==null?null:Number(selection.end)};
+    this.paintSelection();
+  }
+  editSelection(edge,value){
+    if(this.selectionLocked||!this.sourceDuration())return;
+    const range=this.getSelection(),duration=this.sourceDuration(),gap=Math.min(1/this.fps,duration);
+    // The source frame grid determines both endpoints; the end is exclusive.
+    const snapped=value>=duration?duration:Math.round(value*this.fps)/this.fps;
+    if(edge==='start')range.start=Math.max(0,Math.min(snapped,range.end-gap));
+    else range.end=Math.min(duration,Math.max(snapped,range.start+gap));
+    this.setSelection({start:range.start,end:range.end>=duration?null:range.end});
+    this.onViewChange?.('original');
+    this.seek(edge==='start'?range.start:Math.max(range.start,range.end-gap));
+    this.onSelectionChange?.({...this.selection});
+  }
+  bindSelection(handle,edge){
+    let drag=null;
+    handle.addEventListener('pointerdown',event=>{
+      if(event.button!==0||handle.disabled)return;
+      event.preventDefault();event.stopPropagation();handle.focus();
+      drag={id:event.pointerId,x:event.clientX,value:this.getSelection()[edge],width:this.track.getBoundingClientRect().width};
+      handle.setPointerCapture(event.pointerId);handle.classList.add('dragging');this.pause();
+    });
+    handle.addEventListener('pointermove',event=>{
+      if(drag?.id===event.pointerId&&drag.width>0)this.editSelection(edge,drag.value+(event.clientX-drag.x)/drag.width*this.sourceDuration());
+    });
+    const release=event=>{
+      if(drag?.id!==event.pointerId)return;
+      drag=null;handle.classList.remove('dragging');
+      if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);
+    };
+    handle.addEventListener('pointerup',release);handle.addEventListener('pointercancel',release);handle.addEventListener('lostpointercapture',release);
+    handle.addEventListener('keydown',event=>{
+      if(handle.disabled)return;
+      const range=this.getSelection(),step=event.shiftKey?1:1/this.fps;
+      const values={ArrowLeft:range[edge]-step,ArrowDown:range[edge]-step,ArrowRight:range[edge]+step,ArrowUp:range[edge]+step,Home:0,End:this.sourceDuration()};
+      if(!(event.key in values))return;
+      event.preventDefault();event.stopPropagation();this.editSelection(edge,values[event.key]);
+    });
+  }
+  paintSelection(){
+    const range=this.getSelection(),duration=this.sourceDuration(),gap=Math.min(1/this.fps,duration),disabled=this.selectionLocked||!duration;
+    const key=[range.start,range.end,duration,disabled].join(':');if(this.selectionPaintKey===key)return;this.selectionPaintKey=key;
+    this.track.style.setProperty('--trim-start',`${duration?range.start/duration*100:0}%`);
+    this.track.style.setProperty('--trim-end',`${duration?range.end/duration*100:100}%`);
+    for(const [handle,edge,label,min,max] of [[this.trimStart,'start','片段起点',0,Math.max(0,range.end-gap)],[this.trimEnd,'end','片段终点',Math.min(duration,range.start+gap),duration]]){
+      const stamp=StudioVideoPlayer.formatTime(range[edge]);
+      handle.disabled=disabled;handle.setAttribute('aria-valuemin',String(min));handle.setAttribute('aria-valuemax',String(max));
+      handle.setAttribute('aria-valuenow',String(range[edge]));handle.setAttribute('aria-valuetext',stamp);
+      handle.title=`${label} ${stamp}；拖动调整，方向键逐帧微调，Shift + 方向键调整一秒`;
+      handle.querySelector('.trim-time').textContent=stamp;
+    }
+  }
   canCompare(){return this.frame?this.frameOriginal.complete&&this.frameOriginal.naturalWidth>0&&this.frameResult.complete&&this.frameResult.naturalWidth>0:!!this.resultUrl&&!this.resultFailed&&this.result.readyState>=2&&this.source.readyState>=2}
   usingResult(){return !this.frame&&this.view!=='original'&&!!this.resultUrl&&!this.resultFailed}
   duration(){
     let duration=Number.isFinite(this.source.duration)?this.source.duration:0;
-    if(this.usingResult()&&Number.isFinite(this.result.duration))duration=Math.min(duration,this.result.duration);
+    if(this.usingResult()&&Number.isFinite(this.result.duration))duration=Math.min(duration,this.resultOffset+this.result.duration);
     return duration;
   }
-  setLocked(locked){this.locked=locked;this.paintTransport()}
+  startTime(){return this.usingResult()?this.resultOffset:0}
+  setLocked(locked,selectionLocked=locked){this.locked=locked;this.selectionLocked=selectionLocked;this.paintTransport()}
   setView(value){
     this.view=value;
     const end=this.duration();
-    if(end>0&&this.source.currentTime>end)this.seek(Math.max(0,end-.001));
+    if(end>0&&(this.source.currentTime>end||this.source.currentTime<this.startTime()))this.seek(Math.max(this.startTime(),Math.min(this.source.currentTime,end-.001)));
     this.sync(true);this.paint();
   }
   async play(){
     if(this.locked||!this.canCapture())return;
     this.clearFrame();this.wantPlaying=true;this.buffering=false;
-    if(this.source.ended||this.source.currentTime>=this.duration()-.01)this.source.currentTime=0;
+    if(this.source.ended||this.source.currentTime>=this.duration()-.01||this.source.currentTime<this.startTime())this.source.currentTime=this.startTime();
     try{await this.source.play();this.sync(true)}
     catch(error){this.wantPlaying=false;if(error.name!=='AbortError')this.onError('视频暂时无法播放，请稍后重试。')}
     this.paintTransport();
@@ -122,13 +259,14 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
   seek(time){
     if(this.locked||!Number.isFinite(time)||!this.assetId)return;
     this.pause();this.clearFrame();
+    if(this.usingResult()&&(time<this.startTime()||time>this.duration()))this.onViewChange?.('original');
     const duration=this.duration();
-    this.source.currentTime=Math.max(0,Math.min(time,Math.max(0,duration-.0001)));
+    this.source.currentTime=Math.max(this.startTime(),Math.min(time,Math.max(this.startTime(),duration-.0001)));
     this.sync(true);this.paintTransport();
   }
   sync(force=false){
     if(!this.usingResult()||this.result.readyState<1){this.result.pause();return}
-    const target=Math.max(0,Math.min(this.source.currentTime,Math.max(0,this.result.duration-.0001)));
+    const target=Math.max(0,Math.min(this.source.currentTime-this.resultOffset,Math.max(0,this.result.duration-.0001)));
     const drift=target-this.result.currentTime;
     if(!this.result.seeking&&(Math.abs(drift)>(force ? .002 : .10)))this.result.currentTime=target;
     this.result.muted=true;
@@ -165,33 +303,33 @@ window.StudioVideoPlayer = class StudioVideoPlayer {
     this.slider.hidden=!compare;this.line.hidden=!compare;this.line.style.left=`${this.slider.value}%`;
     const sourceLabel=document.querySelector('#video-source-label'),resultLabel=document.querySelector('#video-result-label');
     sourceLabel.hidden=enhanced&&!compare;sourceLabel.textContent=frame?`当前帧 · ${StudioVideoPlayer.formatTime(this.frame.time)}`:'原视频';
-    resultLabel.hidden=!enhanced;resultLabel.textContent=frame?'单帧增强':'增强后';
+    resultLabel.hidden=!enhanced;resultLabel.textContent=frame?'单帧增强':this.resultClip?'片段增强':'增强后';
     let loading='';
     if(this.assetId&&!this.sourceFailed&&this.source.readyState<2)loading='正在加载视频…';
     else if(this.buffering)loading='正在同步视频…';
     else if(enhanced&&(frame||this.resultUrl)&&!this.canCompare()&&!this.resultFailed)loading='正在加载增强预览…';
-    this.loading.textContent=loading;this.loading.hidden=!loading;
+    this.loading.textContent=loading;this.loading.hidden=!this.visible||!loading;
   }
   paintTransport(){
-    const duration=this.duration(),time=Math.min(this.source.currentTime||0,duration),paused=this.source.paused;
+    const duration=this.sourceDuration(),time=Math.min(this.source.currentTime||0,duration),paused=this.source.paused;
     const cache=this.transportCache;
+    this.timeline.min='0';this.paintSelection();
     if(cache.duration!==duration){this.timeline.max=String(duration);cache.duration=duration}
     this.timeline.disabled=this.locked||!duration;this.playButton.disabled=this.locked||!this.canCapture();
     // Synchronization remains per frame; text and timeline paint at most 20 times/s.
     const bucket=Math.floor(time*20);
     if(paused||cache.bucket!==bucket){
       cache.bucket=bucket;this.timeline.value=String(time);
-      this.timeline.style.setProperty('--range',`${duration?time/duration*100:0}%`);
-      const stamp=StudioVideoPlayer.formatTime(time),label=`${stamp} / ${StudioVideoPlayer.formatTime(duration)}`;
+      const stamp=StudioVideoPlayer.formatTime(time),label=`${StudioVideoPlayer.playbackTime(time)} / ${StudioVideoPlayer.playbackTime(duration)}`;
       if(this.timeLabel.textContent!==label)this.timeLabel.textContent=label;
-      if(cache.stamp!==stamp){this.timeline.setAttribute('aria-valuetext',stamp);cache.stamp=stamp}
+      if(cache.stamp!==stamp||cache.timeDuration!==duration){this.timeline.setAttribute('aria-valuetext',stamp);this.timeLabel.title=`${stamp} / ${StudioVideoPlayer.formatTime(duration)}`;cache.stamp=stamp;cache.timeDuration=duration}
     }
     if(cache.paused!==paused){
       cache.paused=paused;this.playButton.title=paused?'播放视频':'暂停视频';
       this.playButton.setAttribute('aria-label',this.playButton.title);this.playIcon.src=`/assets/icons/${paused?'play':'pause'}.svg`;
     }
     if(cache.muted!==this.source.muted){
-      cache.muted=this.source.muted;this.muteButton.textContent=this.source.muted?'取消静音':'静音';this.muteButton.title=this.muteButton.textContent;
+      cache.muted=this.source.muted;this.muteButton.title=this.source.muted?'取消静音':'静音';this.muteButton.setAttribute('aria-label',this.muteButton.title);
       this.muteButton.setAttribute('aria-pressed',String(this.source.muted));
     }
   }

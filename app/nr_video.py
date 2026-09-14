@@ -117,6 +117,7 @@ def probe(ffprobe, path):
     unk = lambda s: (s or "unknown") if s not in ("", None, "unspecified", "reserved") else "unknown"
     return {
         "w": width, "h": height, "rotation": rotation, "fps": fps, "rate": rate, "frames": frames,
+        "duration": float(v.get("duration") or info.get("format", {}).get("duration") or (frames / fps if fps else 0)),
         "pix_fmt": v.get("pix_fmt", ""), "range": unk(v.get("color_range")),
         "matrix": unk(v.get("color_space")), "primaries": unk(v.get("color_primaries")),
         "trc": unk(v.get("color_transfer")),
@@ -340,6 +341,8 @@ def build_parser():
     g.add_argument("--nr-motion-vis", action="store_true",
                    help="output the flow visualisation instead of the NR result (debug)")
     g.add_argument("--frames", type=int, default=0, help="cap frames (0 = whole clip)")
+    g.add_argument("--start", type=float, default=0, help="start at this source time in seconds")
+    g.add_argument("--duration", type=float, default=0, help="duration in seconds (0 = remainder)")
 
     g = ap.add_argument_group("encoding")
     g.add_argument("--codec", default="hevc_nvenc",
@@ -381,6 +384,10 @@ def main():
 
     src = probe(ffprobe, args.inp)
     inW, inH, fps, total = src["w"], src["h"], src["fps"], src["frames"]
+    if (args.start or args.duration) and (not (0 <= args.start < src["duration"]) or not (0 <= args.duration <= src["duration"] - args.start + .001)):
+        sys.exit("invalid clip start or duration")
+    if args.start or args.duration:
+        total = round((args.duration or src["duration"] - args.start) * fps)
     if args.frames:
         total = min(total, args.frames) if total else args.frames
     outW, outH = output_size(src, args.nr_width, args.nr_height, args.nr_scale, args.nr_fit)
@@ -410,7 +417,10 @@ def main():
         if cur == "unknown":
             setp.append(f"{key}={val}")
     vf = ([f"setparams={':'.join(setp)}"] if setp else []) + [f"scale=flags={SWS}", "format=rgba"]
-    dec = [ffmpeg, "-v", "error", "-i", args.inp]
+    seek = ["-ss", str(args.start)] if args.start else []
+    dec = [ffmpeg, "-v", "error"] + seek + ["-i", args.inp]
+    if args.duration:
+        dec += ["-t", str(args.duration)]
     if args.frames:
         dec += ["-frames:v", str(args.frames)]
     dec += ["-vf", ",".join(vf), "-f", "rawvideo", "-"]
@@ -455,11 +465,13 @@ def main():
         evf.append(f"setparams=color_primaries={tags[1]}:color_trc={tags[2]}:range=pc")
     enc = [ffmpeg, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
            "-s", f"{toolW}x{toolH}", "-r", src["rate"], "-i", "-",
-           "-i", args.inp, "-map", "0:v:0"]
+           ] + seek + ["-i", args.inp, "-map", "0:v:0"]
     enc += audio_args(src, ext, args.audio, args.audio_bitrate)
     enc += ["-vf", ",".join(evf)] + vargs
     if ext in (".mp4", ".mov"):
         enc += ["-movflags", "+faststart"]
+    if args.duration:
+        enc += ["-t", str(args.duration)]
     enc += ["-shortest", args.out]
 
     if args.dry_run:

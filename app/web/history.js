@@ -3,7 +3,7 @@ let sessionReady=false;
 const sessionKey='dlss-session-v2';
 function saveSession(){
   if(!sessionReady)return;
-  sessions[state.mode]={asset:state.asset,output:state.output,framePreview:state.framePreview};
+  sessions[state.mode]={asset:state.asset,output:state.output,framePreview:state.framePreview,selection:state.selection};
   try{localStorage.setItem(sessionKey,JSON.stringify({mode:state.mode,sessions,job:state.job,busy:state.busy,
     jobKind:state.jobKind,jobContext:state.jobContext,pendingPayload:state.pendingPayload,
     view:state.view,time:videoPlayer.source.currentTime,settings:state.asset?settings():null}))}catch{}
@@ -19,14 +19,15 @@ function applySettings(values){
   updateCodec();
   for(const control of form.elements){
     if(!control.name||!(control.name in values)||control.name==='codec')continue;
-    if(control.type==='checkbox')control.checked=!!values[control.name];else control.value=values[control.name];
+    if(control.type==='checkbox')control.checked=!!values[control.name];
+    else if(control.tagName!=='SELECT'||[...control.options].some(o=>o.value===String(values[control.name])&&!o.disabled))control.value=values[control.name];
   }
   state.style=values.style||'默认';
   $$('[data-style]').forEach(button=>{const active=button.dataset.style===state.style;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
-  $('#intensity-number').value=$('#intensity').value;
+  $('#intensity-number').value=Math.round(Number($('#intensity').value)*100);
   const cq=String(values.cq??19);$('#quality').value=values.bitrate||!['15','19','23','28'].includes(cq)?'custom':cq;
   $$('.advanced-range').forEach(row=>row.querySelector('output').textContent=`${Math.round(Number(row.querySelector('input').value)*100)}%`);
-  updateCodec();paintRanges();updateOutputSize();
+  updateCodec();paintRanges();refreshProduct();
 }
 
 async function seekRestoredVideo(time){
@@ -48,8 +49,8 @@ async function restoreJob(job){
   const saved=sessions[asset.kind];
   const prior=state.mode===asset.kind&&state.asset?.id===asset.id?state.output:saved?.asset?.id===asset.id?saved.output:null;
   state.busy=false;switchMode(asset.kind);state.asset=asset;state.framePreview=null;state.output=frame?prior:job.status==='done'?job:null;
-  state.job=job.id;state.jobKind=frame?'frame':'full';state.jobContext=frame?{source:job.asset.url,time:job.frame_time}:null;
-  state.pendingPayload=null;applySettings(job.settings);showAsset();
+  state.job=job.id;state.jobKind=job.job_kind||'full';state.jobContext=frame?{source:job.asset.url,time:job.frame_time}:null;
+  state.pendingPayload=null;state.selection=job.job_kind==='clip'?{start:job.settings.clip_start,end:job.settings.clip_start+job.settings.clip_duration}:null;applySettings(job.settings);showAsset();
   if(frame){await seekRestoredVideo(job.frame_time);state.framePreview=job.status==='done'?{job,time:job.frame_time,source:job.asset.url}:null;videoPlayer.setFrame(state.framePreview)}
   if(['queued','running','cancelling'].includes(job.status)){
     state.busy=true;refreshControls();showProgress(job);schedulePoll(job.id,100);
@@ -58,7 +59,7 @@ async function restoreJob(job){
     status(job.status==='done'?'处理完成':job.status==='cancelled'?'已取消':'处理失败',job.status==='error'?'error':'');
     if(job.status==='error')showNotice(job.message,true);refreshControls();
   }
-  updateOutputSize();saveSession();
+  saveSession();
 }
 
 async function restoreSession(){
@@ -71,11 +72,12 @@ async function restoreSession(){
         try{
           const asset=await apiRequest(`/api/assets/${record.asset.id}/info`);
           const result=record.output?await apiRequest(`/api/jobs/${record.output.id}`).catch(()=>null):null;
-          sessions[mode]={asset,output:result?.status==='done'?result:null,framePreview:null};
+          const selection=record.selection??(mode==='video'&&saved.scope==='clip'?{start:Number(saved.clipStart)||0,end:(Number(saved.clipStart)||0)+(Number(saved.clipDuration)||3)}:null);
+          sessions[mode]={asset,output:result?.status==='done'?result:null,framePreview:null,selection};
         }catch(error){if(!error.status)throw error}
       }
       state.mode=saved.mode==='video'?'video':'image';
-      const record=sessions[state.mode];state.asset=record?.asset||null;state.output=record?.output||null;
+      const record=sessions[state.mode];state.asset=record?.asset||null;state.output=record?.output||null;state.selection=record?.selection||null;
       $$('[data-mode]').forEach(button=>{const active=button.dataset.mode===state.mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))});
       $('#video-settings').hidden=state.mode!=='video';$('#file-input').accept=state.mode==='image'?'image/png,image/jpeg,image/webp,image/bmp,image/tiff':'.mp4,.mov,.mkv,.webm,.avi,.m4v';
       applySettings(saved.settings);showAsset();
@@ -95,62 +97,93 @@ async function restoreSession(){
     }
     await seekRestoredVideo(saved?.time);
     view(state.output?.preview?(saved?.view||'result'):'original');
-    status(state.output?'处理完成':state.asset?'就绪':'等待素材');
+    status(state.output?'处理完成':state.asset?'就绪':'等待素材');refreshProduct();
   }finally{sessionReady=true;saveSession()}
 }
 
 (() => {
   const dialog=document.createElement('dialog');dialog.className='history-dialog';dialog.id='history-dialog';dialog.setAttribute('aria-labelledby','history-title');
-  dialog.innerHTML=`<div class="history-heading"><h2 id="history-title">最近结果</h2><button type="button" class="icon-button history-close" aria-label="关闭最近结果"><img class="icon" src="/assets/icons/x.svg" alt=""></button></div><div class="history-tabs"><button type="button" class="glass-button" data-history-tab="recent" aria-pressed="true">处理记录</button><button type="button" class="glass-button" data-history-tab="cache" aria-pressed="false">缓存管理</button></div><p class="history-message" id="history-message" role="status"></p><ul class="history-list"></ul><div class="cache-options" hidden><p class="history-message">闲置清理会保留已完成结果、正在使用的素材和最近一小时上传的素材。</p><label class="check-row"><input type="checkbox" id="clear-results">同时清理历史结果及其素材（当前打开的结果保留）</label><p class="history-message" id="cleanup-warning" hidden>清理后无法恢复这些历史结果，请先下载需要保留的文件。</p><button type="button" class="glass-button" id="cleanup-cache">清理闲置文件</button></div><div class="history-footer"><button type="button" class="glass-button" id="history-prev">上一页</button><span id="history-page"></span><button type="button" class="glass-button" id="history-next">下一页</button><button type="button" class="glass-button" id="history-refresh">刷新</button></div>`;
+  dialog.innerHTML=`<div class="history-heading"><h2 id="history-title">最近结果</h2><button type="button" class="icon-button history-close" aria-label="关闭最近结果"><img class="icon" src="/assets/icons/x.svg" alt=""></button></div><div class="history-tabs"><button type="button" class="glass-button" data-history-tab="recent" aria-pressed="true">处理记录</button><button type="button" class="glass-button" data-history-tab="cache" aria-pressed="false">缓存管理</button></div><label class="history-filter">按素材查看<select id="history-source"><option value="">全部素材</option></select></label><p class="history-message" id="history-message" role="status"></p><ul class="history-list"></ul><div class="cache-options" hidden><p class="history-message">保留当前结果、满意版本、正在使用的素材和最近一小时上传的素材；默认也保留所有已完成结果。</p><label class="check-row"><input type="checkbox" id="clear-results">同时清理未标记满意的历史结果及其素材</label><p class="history-message" id="cleanup-warning" hidden>清理后无法恢复这些历史结果，请先下载需要保留的文件。</p><p class="history-message" id="cleanup-summary" role="status"></p><ul class="cache-preview" aria-label="待清理项目"></ul><button type="button" class="glass-button" id="cleanup-cache" disabled>清理预览中的文件</button></div><div class="history-footer"><button type="button" class="glass-button" id="history-prev">上一页</button><span id="history-page"></span><button type="button" class="glass-button" id="history-next">下一页</button><button type="button" class="glass-button" id="history-refresh">刷新</button></div>`;
   document.body.append(dialog);
-  let tab='recent',page=0,total=0,loading=false;
-  const perPage=()=>Math.max(1,Math.min(4,Math.floor((innerHeight-270)/(innerWidth<=760?108:78))));
-  const message=dialog.querySelector('#history-message'),list=dialog.querySelector('.history-list');
-  const size=bytes=>bytes>=1024**3?`${(bytes/1024**3).toFixed(2)} GiB`:`${(bytes/1024**2).toFixed(1)} MiB`;
+  let tab='recent',page=0,total=0,revision=0,plan=null,cleanupBusy=false;
+  const perPage=()=>innerHeight<600?2:3;
+  const q=selector=>dialog.querySelector(selector),message=q('#history-message'),list=q('.history-list');
+  const size=bytes=>bytes>=1024**3?`${(bytes/1024**3).toFixed(2)} GiB`:bytes>=1024**2?`${(bytes/1024**2).toFixed(1)} MiB`:`${(bytes/1024).toFixed(1)} KiB`;
   const showError=error=>{message.textContent=error.message||'暂时无法读取，请点击刷新重试。';message.classList.add('error')};
-  async function render(){
-    if(loading)return;loading=true;message.classList.remove('error');message.textContent='正在读取…';
-    list.replaceChildren();dialog.querySelector('.cache-options').hidden=tab!=='cache';
-    try{
-      if(tab==='cache'){
-        const value=await apiRequest('/api/cache');message.textContent=`素材与结果共占用 ${size(value.bytes)}。`;
-        dialog.querySelector('#cleanup-cache').disabled=state.busy||state.uploading;
-      }else{
-        const count=perPage(),value=await apiRequest(`/api/jobs?offset=${page*count}&limit=${count}`);total=value.total;
-        message.textContent=total?'结果保存在本机，可重新打开或下载。':'还没有处理记录。上传素材并开始处理后，结果会出现在这里。';
-        for(const job of value.jobs){
-          const item=document.createElement('li');item.className='history-item';
-          const content=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p');
-          name.textContent=(job.job_kind==='frame'?job.source_asset?.name:job.asset?.name)||'素材已清理';name.title=name.textContent;
-          const labels={done:'已完成',error:'失败',cancelled:'已取消',running:'处理中',queued:'等待处理',cancelling:'取消中'};
-          meta.textContent=`${labels[job.status]||job.status} · ${job.job_kind==='frame'?`单帧 ${StudioVideoPlayer.formatTime(job.frame_time)}`:job.asset?.kind==='video'?'视频':'图片'} · ${new Date(job.created_at*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}${job.width?` · ${job.width} × ${job.height}`:''}`;
-          content.append(name,meta);item.append(content);
-          const open=document.createElement('button');open.type='button';open.className='glass-button';open.textContent=job.status==='done'?'查看':'恢复';open.disabled=state.busy&&state.job!==job.id||state.uploading;
-          open.onclick=async()=>{open.disabled=true;try{await restoreJob(job);dialog.close()}catch(error){showError(error);open.disabled=false}};item.append(open);
-          if(job.download){const download=document.createElement('a');download.className='glass-button';download.textContent='下载';download.href=job.download;download.setAttribute('download','');item.append(download)}
-          list.append(item);
-        }
-      }
-      const pages=Math.max(1,Math.ceil(total/perPage()));
-      dialog.querySelector('#history-page').textContent=`${page+1} / ${pages}`;
-      for(const id of ['history-prev','history-next','history-page'])dialog.querySelector('#'+id).hidden=tab==='cache';
-      dialog.querySelector('#history-prev').disabled=page===0;dialog.querySelector('#history-next').disabled=page+1>=pages;
-    }catch(error){showError(error)}finally{loading=false}
-  }
-  $('#history-button').onclick=()=>{page=0;dialog.showModal();render()};
-  dialog.querySelector('.history-close').onclick=()=>dialog.close();
-  dialog.querySelector('#history-refresh').onclick=render;
-  for(const button of dialog.querySelectorAll('[data-history-tab]'))button.onclick=()=>{tab=button.dataset.historyTab;page=0;dialog.querySelectorAll('[data-history-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));render()};
-  dialog.querySelector('#history-prev').onclick=()=>{page--;render()};dialog.querySelector('#history-next').onclick=()=>{page++;render()};
-  dialog.querySelector('#clear-results').onchange=event=>{dialog.querySelector('#cleanup-warning').hidden=!event.target.checked;dialog.querySelector('#cleanup-cache').textContent=event.target.checked?'清理历史素材与结果':'清理闲置文件'};
-  dialog.querySelector('#cleanup-cache').onclick=async()=>{
-    const button=dialog.querySelector('#cleanup-cache');button.disabled=true;
-    const records=[...Object.values(sessions),{asset:state.asset,output:state.output,framePreview:state.framePreview}].filter(Boolean);
-    const payload={include_results:dialog.querySelector('#clear-results').checked,
+  const button=(label,action)=>{const el=document.createElement('button');el.type='button';el.className='glass-button';el.textContent=label;el.onclick=action;return el};
+  function cleanupPayload(){
+    const records=[...Object.values(sessions),{asset:state.asset,output:state.output,framePreview:state.framePreview,selection:state.selection}].filter(Boolean);
+    return {include_results:q('#clear-results').checked,
       keep_asset_ids:records.flatMap(r=>[r.asset?.id,r.framePreview?.job.asset_id]).filter(Boolean),
       keep_job_ids:records.flatMap(r=>[r.output?.id,r.framePreview?.job.id]).filter(Boolean)};
-    try{const result=await apiRequest('/api/cache/cleanup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},60000);await render();message.textContent+=` 已释放 ${size(result.freed_bytes)}${result.skipped?`，${result.skipped} 个占用中的目录未清理`:''}。`}
-    catch(error){showError(error)}finally{button.disabled=state.busy||state.uploading}
+  }
+  async function label(job,values){
+    const saved=await apiRequest(`/api/jobs/${job.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:job.name||'',favorite:!!job.favorite,...values})});
+    Object.assign(job,saved);
+  }
+  function row(job){
+    const item=document.createElement('li');item.className='history-item';
+    const image=document.createElement('img');image.className='history-thumb';image.loading='lazy';image.alt='';
+    image.src=job.thumbnail||(job.asset?.kind==='image'?(job.preview||job.asset.url):'/assets/icons/image.svg');
+    image.onerror=()=>{image.onerror=null;image.src='/assets/icons/image.svg'};
+    const content=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p'),summary=document.createElement('p');
+    const source=(job.source_asset||job.asset)?.name||'素材已清理';
+    name.textContent=job.name||source;name.title=name.textContent;
+    const labels={done:'已完成',error:'失败',cancelled:'已取消',running:'处理中',queued:'等待处理',cancelling:'取消中'};
+    const kind=job.job_kind==='frame'?`单帧 ${StudioVideoPlayer.formatTime(job.frame_time)}`:job.job_kind==='clip'?`片段 ${StudioVideoPlayer.formatTime(job.clip_start)} · ${job.settings.clip_duration} 秒`:job.asset?.kind==='video'?'视频':'图片';
+    meta.textContent=`${job.name?source+' · ':''}${labels[job.status]||job.status} · ${kind} · ${new Date(job.created_at*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}${job.width?` · ${job.width} × ${job.height}`:''}`;
+    summary.textContent=settingSummary(job.settings);content.append(name,meta,summary);item.append(image,content);
+    const actions=document.createElement('div');actions.className='history-actions';
+    const open=button(job.status==='done'?'查看':'恢复',async()=>{open.disabled=true;try{await restoreJob(job);dialog.close()}catch(error){showError(error);open.disabled=false}});
+    open.disabled=state.busy&&state.job!==job.id||state.uploading;actions.append(open);
+    if(job.download){const download=document.createElement('a');download.className='glass-button';download.textContent='下载';download.href=job.download;download.setAttribute('download','');actions.append(download)}
+    const reuse=button('复用设置',()=>{applySettings(job.settings);settingsChanged();dialog.close();showNotice('已载入此版本的设置，重新处理后生效。')});reuse.disabled=state.busy||state.uploading;actions.append(reuse);
+    const favorite=button(job.favorite?'已标满意':'标为满意',async()=>{favorite.disabled=true;try{await label(job,{favorite:!job.favorite});favorite.textContent=job.favorite?'已标满意':'标为满意';favorite.setAttribute('aria-pressed',String(job.favorite))}catch(error){showError(error)}finally{favorite.disabled=false}});
+    favorite.setAttribute('aria-pressed',String(!!job.favorite));favorite.title='满意版本及其素材不会被缓存清理删除';actions.append(favorite);
+    const edit=document.createElement('div');edit.className='history-name';edit.hidden=true;
+    const input=document.createElement('input');input.type='text';input.maxLength=80;input.value=job.name||'';input.placeholder='填写版本名称';input.setAttribute('aria-label','版本名称');
+    const save=button('保存名称',async()=>{save.disabled=true;try{await label(job,{name:input.value});name.textContent=job.name||source;name.title=name.textContent;edit.hidden=true}catch(error){showError(error)}finally{save.disabled=false}});
+    const cancel=button('取消',()=>{edit.hidden=true});edit.append(input,save,cancel);
+    actions.append(button('命名',()=>{edit.hidden=!edit.hidden;if(!edit.hidden)input.focus()}));item.append(actions,edit);return item;
+  }
+  async function render(){
+    const current=++revision;plan=null;message.classList.remove('error');message.textContent='正在读取…';
+    list.replaceChildren();q('.cache-preview').replaceChildren();q('#cleanup-cache').disabled=true;
+    q('.cache-options').hidden=tab!=='cache';q('.history-filter').hidden=tab!=='recent';
+    q('#cleanup-summary').textContent='正在计算清理范围…';
+    for(const id of ['history-prev','history-next','history-page'])q('#'+id).hidden=tab==='cache';
+    try{
+      if(tab==='cache'){
+        const payload=cleanupPayload();
+        const [stats,preview]=await Promise.all([apiRequest('/api/cache'),apiRequest('/api/cache/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})]);
+        if(current!==revision)return;
+        plan={...payload,preview_token:preview.preview_token};message.textContent=`素材与结果共占用 ${size(stats.bytes)}。`;
+        const c=preview.counts;q('#cleanup-summary').textContent=`预计释放 ${size(preview.bytes)} · 临时目录 ${c.temporary} 个 · 源素材 ${c.asset} 份 · 已完成结果 ${c.result} 份`;
+        for(const entry of preview.items){const li=document.createElement('li'),text=document.createElement('span'),bytes=document.createElement('span');text.textContent=`${{temporary:'临时文件',asset:'源素材',result:'处理结果'}[entry.kind]} · ${entry.name}`;text.title=entry.id;bytes.textContent=size(entry.bytes);li.append(text,bytes);q('.cache-preview').append(li)}
+        q('#cleanup-cache').disabled=cleanupBusy||state.busy||state.uploading||!preview.items.length;
+      }else{
+        const source=q('#history-source').value;
+        const [value,groups]=await Promise.all([apiRequest(`/api/jobs?offset=${page*perPage()}&limit=${perPage()}&source=${encodeURIComponent(source)}`),apiRequest('/api/history/sources')]);
+        if(current!==revision)return;total=value.total;
+        populateSelect(q('#history-source'),[['全部素材',''],...groups.sources.map(s=>[`${s.name} · ${s.count} 个版本`,s.id])],source);
+        message.textContent=total?`共 ${total} 个版本。设置可复用，满意版本会保留。`:'还没有处理记录。上传素材并开始处理后，结果会出现在这里。';
+        for(const job of value.jobs)list.append(row(job));
+        const pages=Math.max(1,Math.ceil(total/perPage()));
+        q('#history-page').textContent=`${page+1} / ${pages}`;q('#history-prev').disabled=page===0;q('#history-next').disabled=page+1>=pages;
+      }
+    }catch(error){if(current===revision)showError(error)}
+  }
+  $('#history-button').onclick=()=>{page=0;dialog.showModal();render()};
+  q('.history-close').onclick=()=>dialog.close();q('#history-refresh').onclick=render;
+  q('#history-source').onchange=()=>{page=0;render()};
+  for(const control of dialog.querySelectorAll('[data-history-tab]'))control.onclick=()=>{tab=control.dataset.historyTab;page=0;dialog.querySelectorAll('[data-history-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b===control)));render()};
+  q('#history-prev').onclick=()=>{page--;render()};q('#history-next').onclick=()=>{page++;render()};
+  q('#clear-results').onchange=event=>{q('#cleanup-warning').hidden=!event.target.checked;render()};
+  q('#cleanup-cache').onclick=async()=>{
+    if(!plan||cleanupBusy||state.busy||state.uploading)return;
+    cleanupBusy=true;q('#cleanup-cache').disabled=true;q('#clear-results').disabled=true;
+    try{const result=await apiRequest('/api/cache/cleanup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(plan)},60000);await render();message.textContent+=` 已释放 ${size(result.freed_bytes)}${result.skipped?`，${result.skipped} 个占用中的目录未清理`:''}。`}
+    catch(error){await render();showError(error)}finally{cleanupBusy=false;q('#clear-results').disabled=false}
   };
-  let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(dialog.open){page=0;render()}},150)});
+  let timer;window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(()=>{if(dialog.open){page=0;render()}},150)});
 })();
